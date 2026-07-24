@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model assets are downloaded on first run, not vendored
+models/*.task
+
+# Local user state — baselines and session history never belong in git
+*.db
+baseline.json
+config.json
+
+.vscode/
+.idea/
+
+# Local smoke-test state
+.localstate/

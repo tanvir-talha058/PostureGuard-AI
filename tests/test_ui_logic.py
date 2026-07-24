@@ -1,0 +1,132 @@
+"""Tests for UI code that carries real logic rather than pixels.
+
+Widget rendering is verified by eye through tools/preview_app.py. What is tested here
+is the decision-making that happens to live in UI modules — chart data shaping, layout
+invariants that have broken before, and the design tokens the charts depend on.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+pytest.importorskip("PySide6")
+
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from postureguard import theme  # noqa: E402
+from postureguard.ui.charts import Bar, ColumnChart, RankedBarChart, score_color  # noqa: E402
+from postureguard.ui.widgets import Card, PageHeader, StatTile, label  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def qt_app():
+    app = QApplication.instance() or QApplication([])
+    yield app
+
+
+class TestScoreColour:
+    def test_uses_the_reserved_status_palette(self):
+        assert score_color(95) is theme.IN_TOLERANCE
+        assert score_color(70) is theme.WARNING
+        assert score_color(30) is theme.FAULT
+
+    def test_thresholds_are_inclusive_at_the_boundary(self):
+        assert score_color(80) is theme.IN_TOLERANCE
+        assert score_color(60) is theme.WARNING
+
+
+class TestSeriesPalette:
+    def test_series_colours_are_distinct_from_the_status_colours(self):
+        """Reusing the fault red as a series would make a breakdown read as an alarm."""
+        status = {theme.IN_TOLERANCE.name(), theme.WARNING.name(), theme.FAULT.name()}
+        assert not {c.name() for c in theme.SERIES} & status
+
+    def test_there_is_a_colour_for_every_fault_kind(self):
+        from postureguard.rules import FaultKind
+
+        assert len(theme.SERIES) >= len(FaultKind)
+
+
+class TestChartData:
+    def test_a_chart_with_only_missing_values_reports_no_data(self, qt_app):
+        chart = ColumnChart()
+        chart.set_bars([Bar("01", None), Bar("02", None)])
+        assert not chart.has_data
+
+    def test_a_single_real_value_counts_as_data(self, qt_app):
+        chart = ColumnChart()
+        chart.set_bars([Bar("01", None), Bar("02", 42.0)])
+        assert chart.has_data
+
+    def test_missing_values_render_as_a_baseline_tick_not_a_zero_bar(self, qt_app):
+        """A day you did not work is not a day you scored zero."""
+        chart = ColumnChart()
+        chart.resize(400, 200)
+        chart.set_bars([Bar("01", None), Bar("02", 0.0)])
+        rects = dict((i, r) for i, r in chart._bar_rects())
+        assert rects[0].height() == pytest.approx(2.0)  # absent: flat tick
+        assert rects[1].height() >= 2.0  # a real zero still draws a minimum bar
+        assert rects[0].top() > rects[1].top() or rects[1].height() >= rects[0].height()
+
+    def test_zero_and_missing_are_distinguishable(self, qt_app):
+        chart = ColumnChart()
+        chart.resize(400, 200)
+        chart.set_bars([Bar("a", None)])
+        absent = chart._bar_rects()[0][1]
+        chart.set_bars([Bar("a", 100.0)])
+        full = chart._bar_rects()[0][1]
+        assert full.height() > absent.height()
+
+    def test_ranked_chart_grows_to_fit_its_rows(self, qt_app):
+        chart = RankedBarChart()
+        chart.set_bars([Bar(f"f{i}", float(i + 1), f"{i}m") for i in range(5)])
+        assert chart.minimumHeight() >= 5 * RankedBarChart.ROW_HEIGHT
+
+    def test_ranked_chart_handles_an_all_zero_series_without_dividing_by_zero(self, qt_app):
+        chart = RankedBarChart()
+        chart.resize(400, 200)
+        chart.set_bars([Bar("a", 0.0, "0m"), Bar("b", 0.0, "0m")])
+        assert chart._row_rects()  # must not raise
+
+
+class TestLayoutInvariants:
+    """Regressions for the wrapping bug that clipped every control on Settings."""
+
+    def test_body_labels_wrap_by_default(self, qt_app):
+        assert label("some prose", "Body").wordWrap()
+
+    def test_page_subtitles_wrap_by_default(self, qt_app):
+        assert label("some prose", "PageSubtitle").wordWrap()
+
+    def test_eyebrows_and_metrics_do_not_wrap(self, qt_app):
+        assert not label("GAP", "Eyebrow").wordWrap()
+        assert not label("0.62", "Metric").wordWrap()
+
+    def test_a_long_card_subtitle_does_not_widen_the_card(self, qt_app):
+        """An unwrapped subtitle used to force its container past the viewport."""
+        short = Card("Title", "Short.")
+        long = Card("Title", "A subtitle that runs on at considerable length, "
+                             "well past any sensible single-line width, and would "
+                             "otherwise impose its full extent as a layout minimum.")
+        assert long.minimumSizeHint().width() < 600
+        assert long.minimumSizeHint().width() < short.minimumSizeHint().width() + 400
+
+    def test_a_long_page_subtitle_does_not_widen_the_header(self, qt_app):
+        header = PageHeader("Title", "A subtitle of considerable and unreasonable "
+                                     "length that should never dictate layout width.")
+        assert header.minimumSizeHint().width() < 600
+
+
+class TestStatTile:
+    def test_recolouring_preserves_the_metric_type_role(self, qt_app):
+        """Swapping objectName used to drop the font and leave a tiny number."""
+        tile = StatTile("score", "88", "%")
+        tile.set_tone("StatusFault")
+        assert tile._value.objectName() == "Metric"
+        assert theme.FAULT.name() in tile._value.styleSheet()
+
+    def test_notes_are_hidden_until_there_is_one(self, qt_app):
+        tile = StatTile("score", "88")
+        assert not tile._note.isVisible()
+        tile.set_value("88", note="over 3 days")
+        assert tile._note.text() == "over 3 days"
