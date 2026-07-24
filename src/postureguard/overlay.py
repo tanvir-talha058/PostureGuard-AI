@@ -32,6 +32,12 @@ FAULT_HEIGHT = 68
 READINGS_HEIGHT = 34
 CORNER_RADIUS = 10
 
+#: Collapsed, the panel is a single bar carrying the instruction and nothing else.
+#: No camera, no skeleton, no readings — at this size they would be decoration, and
+#: what the user needs mid-task is the correction, not the evidence for it.
+COLLAPSED_HEIGHT = 46
+ACCENT_BAR_WIDTH = 3
+
 STATUS_LABELS = {
     "starting": "STARTING",
     "calibrating": "CALIBRATING",
@@ -81,13 +87,15 @@ class PostureOverlay(QWidget):
     hide_requested = Signal()
     recalibrate_requested = Signal()
     moved = Signal(int, int)
+    collapsed_changed = Signal(bool)
 
-    def __init__(self, thresholds: Thresholds | None = None) -> None:
+    def __init__(self, thresholds: Thresholds | None = None, collapsed: bool = False) -> None:
         super().__init__()
         self.thresholds = thresholds or Thresholds()
         self.model = ViewModel()
         self._drag_origin: QPoint | None = None
         self._pulse = 0.0
+        self._collapsed = collapsed
 
         self.setWindowTitle("PostureGuard")
         self.setWindowFlags(
@@ -96,11 +104,10 @@ class PostureOverlay(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(
-            theme.PANEL_WIDTH,
-            HEADER_HEIGHT + theme.VIDEO_HEIGHT + FAULT_HEIGHT + READINGS_HEIGHT,
+        self._apply_size()
+        self.setToolTip(
+            "Drag to move · double-click to collapse or expand · right-click for options"
         )
-        self.setToolTip("Drag to move · double-click to open · right-click for options")
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_menu)
 
@@ -109,6 +116,34 @@ class PostureOverlay(QWidget):
         self._pulse_timer = QTimer(self)
         self._pulse_timer.setInterval(60)
         self._pulse_timer.timeout.connect(self._advance_pulse)
+
+    # --- collapse -------------------------------------------------------------------
+
+    @property
+    def collapsed(self) -> bool:
+        return self._collapsed
+
+    def _apply_size(self) -> None:
+        full = HEADER_HEIGHT + theme.VIDEO_HEIGHT + FAULT_HEIGHT + READINGS_HEIGHT
+        self.setFixedSize(
+            theme.PANEL_WIDTH, COLLAPSED_HEIGHT if self._collapsed else full
+        )
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        if collapsed == self._collapsed:
+            return
+        # Collapse toward the bottom edge. Growing downward off the bottom of the
+        # screen is how a corner-parked panel ends up half out of view.
+        bottom = self.y() + self.height()
+        self._collapsed = collapsed
+        self._apply_size()
+        self.move(self.x(), bottom - self.height())
+        self.collapsed_changed.emit(collapsed)
+        self.moved.emit(self.x(), self.y())
+        self.update()
+
+    def toggle_collapsed(self) -> None:
+        self.set_collapsed(not self._collapsed)
 
     # --- external API -------------------------------------------------------------
 
@@ -134,6 +169,12 @@ class PostureOverlay(QWidget):
 
     def _show_menu(self, position: QPoint) -> None:
         menu = QMenu(self)
+
+        expand = QAction("Expand" if self._collapsed else "Collapse to a bar", menu)
+        expand.triggered.connect(self.toggle_collapsed)
+        menu.addAction(expand)
+        menu.addSeparator()
+
         for text, signal in (
             ("Open PostureGuard", self.open_requested),
             ("Snooze alerts", self.snooze_requested),
@@ -149,7 +190,10 @@ class PostureOverlay(QWidget):
         menu.exec(self.mapToGlobal(position))
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        self.open_requested.emit()
+        # Shade the panel, the way double-clicking a title bar has always done.
+        # Opening the main window stays on the context menu, where an action that
+        # takes over the screen belongs.
+        self.toggle_collapsed()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -181,10 +225,13 @@ class PostureOverlay(QWidget):
         painter.setClipPath(path)
         painter.fillRect(surface, theme.INK)
 
-        y = self._paint_header(painter)
-        y = self._paint_view(painter, y)
-        y = self._paint_instruction(painter, y)
-        self._paint_readings(painter, y)
+        if self._collapsed:
+            self._paint_bar(painter, surface)
+        else:
+            y = self._paint_header(painter)
+            y = self._paint_view(painter, y)
+            y = self._paint_instruction(painter, y)
+            self._paint_readings(painter, y)
 
         # A hairline keeps the panel from dissolving into a dark desktop wallpaper.
         # As escalation climbs the border brightens and breathes — the panel earns
@@ -206,6 +253,68 @@ class PostureOverlay(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(path)
         painter.end()
+
+    def _paint_bar(self, painter: QPainter, surface: QRectF) -> None:
+        """Collapsed: the instruction, and nothing that is not the instruction."""
+        fault = self.model.primary_fault
+        colour = self.accent
+        painter.fillRect(surface, theme.PANEL)
+
+        if fault is not None:
+            # Tint the whole bar so a fault is unmistakable in peripheral vision,
+            # where a small coloured strip alone would not register.
+            painter.fillRect(surface, theme.with_alpha(colour, 30))
+
+        # A coloured edge carries the state even when the text is not being read.
+        painter.fillRect(QRectF(0, 0, ACCENT_BAR_WIDTH, surface.height()), colour)
+
+        left = ACCENT_BAR_WIDTH + theme.GUTTER
+        held = self.model.held_seconds
+        note = f"{int(held)}s" if fault is not None and held >= 5 else ""
+        note_width = 44 if note else 0
+
+        painter.setFont(theme.reading_label_font())
+        painter.setPen(theme.MUTED)
+        if note:
+            painter.drawText(
+                QRectF(surface.width() - note_width - theme.GUTTER, 0, note_width, surface.height()),
+                int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                note,
+            )
+
+        text_rect = QRectF(
+            left, 0, surface.width() - left - note_width - theme.GUTTER * 1.5, surface.height()
+        )
+        painter.setFont(theme.fault_title_font())
+
+        if fault is not None:
+            painter.setPen(theme.BONE)
+            text = fault.action
+        else:
+            painter.setPen(theme.MUTED)
+            text = self._resting_text()
+
+        # Elide rather than wrap or overflow: the bar has one line, and a clipped
+        # instruction is worse than a shortened one.
+        metrics = painter.fontMetrics()
+        painter.drawText(
+            text_rect,
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            metrics.elidedText(text, Qt.TextElideMode.ElideRight, int(text_rect.width())),
+        )
+
+    def _resting_text(self) -> str:
+        """What the bar says when there is nothing to correct."""
+        status = self.model.status
+        if status == "calibrating":
+            return self.model.message or "Calibrating…"
+        if status == "searching":
+            return "No subject"
+        if status == "snoozed":
+            return "Alerts snoozed"
+        if status == "starting":
+            return "Starting…"
+        return "Posture is fine"
 
     def _paint_header(self, painter: QPainter) -> float:
         rect = QRectF(0, 0, self.width(), HEADER_HEIGHT)

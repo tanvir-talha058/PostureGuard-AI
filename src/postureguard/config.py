@@ -44,6 +44,8 @@ class Config:
     #: The compact always-on-top readout. On by default: it is the surface that makes
     #: correction possible while you are working, rather than when you go looking.
     mini_window: bool = True
+    #: Collapsed to a single instruction bar, with no camera view or readings.
+    mini_collapsed: bool = False
     #: Last position on screen. -1 means "not placed yet, put it bottom-right".
     mini_x: int = -1
     mini_y: int = -1

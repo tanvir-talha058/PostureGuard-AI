@@ -302,6 +302,7 @@ class SettingsScreen(QWidget):
             # Carried through, not rebuilt. This constructor rebuilds Config from the
             # visible controls, so any field without one here silently reverts to its
             # default — which would throw away the mini window's saved position.
+            mini_collapsed=self.config.mini_collapsed,
             mini_x=self.config.mini_x,
             mini_y=self.config.mini_y,
             start_minimized=self.config.start_minimized,

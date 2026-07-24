@@ -38,7 +38,7 @@ class Application:
         self.window = MainWindow()
         self.toast = Toast()
         self.dim = DimOverlay(config.dim_max_opacity)
-        self.mini = PostureOverlay(config.thresholds())
+        self.mini = PostureOverlay(config.thresholds(), collapsed=config.mini_collapsed)
 
         self.live = LiveScreen(config.thresholds(), self.store)
         self.history = HistoryScreen(self.store)
@@ -66,6 +66,7 @@ class Application:
         self.mini.recalibrate_requested.connect(self.controller.recalibrate)
         self.mini.hide_requested.connect(self._hide_mini)
         self.mini.moved.connect(self._remember_mini_position)
+        self.mini.collapsed_changed.connect(self._remember_mini_collapsed)
         self.controller.toast_requested.connect(self.toast.present)
         self.controller.dim_changed.connect(self.dim.set_progress)
         self.controller.break_due.connect(self._on_break_due)
@@ -139,12 +140,23 @@ class Application:
         self.exercises.refresh()
 
     def _on_config_changed(self, config: Config) -> None:
+        # The settings screen owns whether the mini window exists; the window itself
+        # owns where it sits and whether it is collapsed. Settings has no control for
+        # those, and its copy of them goes stale the moment the user drags the window,
+        # so they are read back from the live truth rather than from the emitted copy.
+        config.mini_collapsed = self.mini.collapsed
+        config.mini_x, config.mini_y = self.config.mini_x, self.config.mini_y
+
+        was_shown = self.config.mini_window
         self.config = config
         config.save(paths.config_path())
         self.controller.apply_config(config)
         self.dim.max_opacity = config.dim_max_opacity
         self.live.video.thresholds = config.thresholds()
         self.mini.thresholds = config.thresholds()
+
+        if config.mini_window != was_shown:
+            self.set_mini_visible(config.mini_window)
 
     def _on_recalibrate_from_settings(self) -> None:
         self.controller.recalibrate()
@@ -188,6 +200,10 @@ class Application:
 
     def _remember_mini_position(self, x: int, y: int) -> None:
         self.config.mini_x, self.config.mini_y = x, y
+        self.config.save(paths.config_path())
+
+    def _remember_mini_collapsed(self, collapsed: bool) -> None:
+        self.config.mini_collapsed = collapsed
         self.config.save(paths.config_path())
 
     def set_mini_visible(self, visible: bool) -> None:

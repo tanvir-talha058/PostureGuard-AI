@@ -64,10 +64,22 @@ but the mini window is what is in front of you at the moment you are getting it 
 It stays calm while you are fine and earns attention only as a fault is ignored: the
 border brightens and breathes once escalation begins, and a `HELD 68S` readout says why.
 
+### Collapsed to a bar
+
+Double-click it to shade the panel down to a single 46px bar showing **only the
+instruction** — "Pull your chin back", "Sit tall — chest up" — with the elapsed time on
+the right. No camera, no skeleton, no readings: at that size they would be decoration,
+and what you need mid-task is the correction, not the evidence for it.
+
+Each fault carries both a full cue for the panel and a short imperative for the bar,
+sharing a verb so the two read as one instruction rather than two. The bar tints and its
+edge colours with state, so it is legible without being read.
+
 - **Drag** it anywhere; the position is remembered, and clamped back on-screen if you
-  unplug a monitor.
-- **Double-click** to open the main window.
-- **Right-click** for open / snooze / recalibrate / hide.
+  unplug a monitor. Collapsing keeps the bottom edge anchored, so a corner-parked bar
+  never grows off the screen.
+- **Double-click** to collapse or expand.
+- **Right-click** for collapse / open / snooze / recalibrate / hide.
 - Toggle from the tray, the Live screen, or Settings → Interventions.
 
 ## The intervention ladder
@@ -119,7 +131,7 @@ they are unit-tested against synthetic poses. Everything else is verified by run
 ## Development
 
 ```bash
-.venv/Scripts/python -m pytest          # 166 tests
+.venv/Scripts/python -m pytest          # 172 tests
 python tools/preview_app.py             # render every screen with seeded data
 python tools/preview_overlay.py         # render the compact overlay states
 ```

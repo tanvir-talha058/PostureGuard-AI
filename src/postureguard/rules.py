@@ -53,6 +53,11 @@ class Fault:
     def title(self) -> str:
         return FAULT_TITLES[self.kind]
 
+    @property
+    def action(self) -> str:
+        """The correction in a few words, for surfaces with no room to explain."""
+        return FAULT_ACTIONS[self.kind]
+
 
 FAULT_TITLES: dict[FaultKind, str] = {
     FaultKind.FORWARD_HEAD: "Forward head",
@@ -68,6 +73,17 @@ _CUES: dict[FaultKind, str] = {
     FaultKind.SCREEN_TOO_CLOSE: "Push back to about an arm's length from the screen.",
     FaultKind.LATERAL_TILT: "Level out — even your shoulders and bring your head upright.",
     FaultKind.DRIFT: "You've been slowly sinking. Reset: feet flat, hips back, chest up.",
+}
+
+# The same correction, short enough to read at a glance rather than to sit and parse.
+# The collapsed bar shows only this; the full cue above is for the panel and the toast,
+# where there is room to explain. Same verb in both, so they read as one instruction.
+FAULT_ACTIONS: dict[FaultKind, str] = {
+    FaultKind.FORWARD_HEAD: "Pull your chin back",
+    FaultKind.SPINE_FLEXION: "Sit tall — chest up",
+    FaultKind.SCREEN_TOO_CLOSE: "Push back from the screen",
+    FaultKind.LATERAL_TILT: "Level your shoulders",
+    FaultKind.DRIFT: "Reset — feet flat, hips back",
 }
 
 _JOINTS: dict[FaultKind, tuple[str, ...]] = {

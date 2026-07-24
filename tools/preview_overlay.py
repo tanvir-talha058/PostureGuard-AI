@@ -85,7 +85,7 @@ def main() -> int:
             frame=frame, landmarks=upright,
             metrics=compute_metrics(upright, ASPECT), baseline=None,
             aspect=ASPECT, status="calibrating",
-            message="Sit tall — recording your baseline in 3",
+            message="Sit tall — baseline in 3",
         ),
         "02-in-tolerance": ViewModel(
             frame=frame, landmarks=upright,
@@ -122,6 +122,14 @@ def main() -> int:
         overlay.show_model(model)
         overlay.grab().save(str(out / f"{name}.png"))
         print(f"wrote {out / f'{name}.png'}")
+
+    # Collapsed: the same states as a single instruction bar.
+    overlay.set_collapsed(True)
+    for name in ("02-in-tolerance", "03-forward-head", "05-escalated", "01-calibrating"):
+        overlay.show_model(states[name])
+        path = out / f"bar-{name.split('-', 1)[1]}.png"
+        overlay.grab().save(str(path))
+        print(f"wrote {path}")
 
     del app
     return 0

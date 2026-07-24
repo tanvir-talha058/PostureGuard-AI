@@ -159,7 +159,9 @@ class Engine:
                 landmarks=landmarks,
                 metrics=metrics,
                 status="calibrating",
-                message=f"Sit tall — recording your baseline in {remaining:.0f}",
+                # Kept short so the countdown survives in the collapsed bar, where a
+                # longer sentence elides away exactly the digit that matters.
+                message=f"Sit tall — baseline in {remaining:.0f}",
             )
 
         self._builder.add(metrics)

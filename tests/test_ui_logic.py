@@ -186,6 +186,63 @@ class TestMiniWindow:
         overlay.show_model(ViewModel(urgency=0))
         assert not overlay._pulse_timer.isActive()
 
+    def test_collapsing_shrinks_to_a_bar(self, qt_app):
+        from postureguard.overlay import COLLAPSED_HEIGHT, PostureOverlay
+
+        overlay = PostureOverlay()
+        full = overlay.height()
+        overlay.set_collapsed(True)
+        assert overlay.height() == COLLAPSED_HEIGHT
+        assert overlay.height() < full
+        overlay.set_collapsed(False)
+        assert overlay.height() == full
+
+    def test_collapsing_keeps_the_bottom_edge_anchored(self, qt_app):
+        """A corner-parked panel must not grow down off the bottom of the screen."""
+        from postureguard.overlay import PostureOverlay
+
+        overlay = PostureOverlay()
+        overlay.move(100, 400)
+        bottom = overlay.y() + overlay.height()
+        overlay.set_collapsed(True)
+        assert overlay.y() + overlay.height() == bottom
+        overlay.set_collapsed(False)
+        assert overlay.y() + overlay.height() == bottom
+
+    def test_collapse_state_is_reported_once_per_change(self, qt_app):
+        from postureguard.overlay import PostureOverlay
+
+        overlay = PostureOverlay()
+        seen = []
+        overlay.collapsed_changed.connect(seen.append)
+        overlay.set_collapsed(True)
+        overlay.set_collapsed(True)  # no-op, must not re-emit
+        overlay.set_collapsed(False)
+        assert seen == [True, False]
+
+    def test_it_can_be_constructed_already_collapsed(self, qt_app):
+        from postureguard.overlay import COLLAPSED_HEIGHT, PostureOverlay
+
+        assert PostureOverlay(collapsed=True).height() == COLLAPSED_HEIGHT
+
+    def test_every_fault_has_a_short_action_for_the_bar(self, qt_app):
+        """The full cue is a sentence; a bar has one line and must not clip it."""
+        from postureguard.rules import FAULT_ACTIONS, FaultKind
+
+        for kind in FaultKind:
+            assert kind in FAULT_ACTIONS
+            action = FAULT_ACTIONS[kind]
+            assert action.strip()
+            assert len(action) <= 32, f"{kind} action too long for the bar: {action!r}"
+
+    def test_the_short_action_shares_a_verb_with_the_full_cue(self, qt_app):
+        """Bar and panel must read as one instruction, not two different ones."""
+        from postureguard.rules import FAULT_ACTIONS, _CUES, FaultKind
+
+        for kind in (FaultKind.FORWARD_HEAD, FaultKind.SPINE_FLEXION, FaultKind.LATERAL_TILT):
+            verb = FAULT_ACTIONS[kind].split()[0].lower().strip("—")
+            assert verb in _CUES[kind].lower()
+
     def test_faulty_joints_are_collected_from_every_active_fault(self, qt_app):
         from postureguard.overlay import ViewModel
         from postureguard.rules import Fault, FaultKind
