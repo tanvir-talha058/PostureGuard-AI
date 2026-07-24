@@ -270,6 +270,32 @@ def stylesheet() -> str:
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
     QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
 
+    /* --- keyboard focus ------------------------------------------------------
+       Part of the quality floor, not a nicety: without it the app is unusable
+       without a mouse, because nothing indicates where you are. Applied on
+       :focus rather than :hover so it only appears for keyboard navigation. */
+
+    QPushButton#Primary:focus,
+    QPushButton#Secondary:focus,
+    QPushButton#Ghost:focus,
+    QPushButton#NavItem:focus {{
+        border: 1px solid {bone};
+        outline: none;
+    }}
+    QCheckBox:focus {{ color: {bone}; }}
+    QCheckBox::indicator:focus {{ border: 1px solid {bone}; }}
+    QComboBox:focus, QSpinBox:focus, QLineEdit#PathField:focus {{
+        border: 1px solid {accent};
+        outline: none;
+    }}
+    QSlider:focus {{ outline: none; }}
+    QSlider::handle:horizontal:focus {{
+        background: #FFFFFF;
+        border: 2px solid {accent};
+        width: 12px; height: 12px; margin: -6px 0;
+        border-radius: 8px;
+    }}
+
     /* --- status accents ---------------------------------------------------- */
 
     QLabel#StatusGood  {{ color: {accent}; }}

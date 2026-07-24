@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
-from PySide6.QtCore import QPoint, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QMouseEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QMenu, QWidget
 
@@ -485,10 +485,14 @@ class PostureOverlay(QWidget):
     # --- helpers ------------------------------------------------------------------
 
     def _hairline(self, painter: QPainter, y: float) -> None:
+        from .ui.widgets import crisp
+
         pen = QPen(theme.RULE)
         pen.setWidthF(1.0)
         painter.setPen(pen)
-        painter.drawLine(QRectF(0, y, self.width(), 0).topLeft(), QRectF(0, y, self.width(), 0).topRight())
+        # Half-pixel offset, or the antialiased 1px stroke smears across two rows.
+        edge = crisp(y)
+        painter.drawLine(QPointF(0, edge), QPointF(self.width(), edge))
 
     def _centred_note(self, painter: QPainter, rect: QRectF, text: str) -> None:
         painter.setFont(theme.cue_font())

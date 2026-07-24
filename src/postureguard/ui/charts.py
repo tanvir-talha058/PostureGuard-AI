@@ -26,11 +26,18 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QToolTip, QWidget
 
 from .. import theme
+from .widgets import crisp
 
 BAR_RADIUS = 4
 BAR_GAP = 2
 AXIS_HEIGHT = 22
 LABEL_WIDTH = 34
+
+#: Bars occupy a share of their slot rather than filling it, and never exceed a fixed
+#: width. A bar that fills its slot is a slab: the eye reads the mass rather than the
+#: height, and a short series turns into a solid block of colour.
+BAR_SLOT_RATIO = 0.62
+MAX_BAR_WIDTH = 42
 
 
 @dataclass(frozen=True)
@@ -112,16 +119,29 @@ class ColumnChart(_ChartBase):
         if not self.bars or plot.width() <= 0:
             return []
         slot = plot.width() / len(self.bars)
+        baseline = round(plot.bottom())
         rects = []
         for index, bar in enumerate(self.bars):
-            left = plot.left() + index * slot
-            width = max(slot - BAR_GAP, 1.0)
+            # Whole-pixel edges. Fractional bar geometry antialiases every vertical
+            # edge into a soft two-pixel seam, which is what makes a bar chart look
+            # blurry next to crisp text.
+            slot_left = plot.left() + index * slot
+            width = max(
+                round(min(slot - BAR_GAP, slot * BAR_SLOT_RATIO, MAX_BAR_WIDTH)), 1
+            )
+            # Centred in its slot, so the rhythm of the series stays even.
+            left = round(slot_left + (slot - width) / 2)
             if bar.value is None:
-                rects.append((index, QRectF(left, plot.bottom() - 2, width, 2)))
+                # An untracked slot: a short centred stub, narrower than a real bar so
+                # it is distinguishable from a genuine zero by shape as well as colour.
+                stub = max(round(width * 0.4), 2)
+                rects.append(
+                    (index, QRectF(left + (width - stub) / 2, baseline - 2, stub, 2))
+                )
                 continue
             ratio = max(min(bar.value / self.maximum, 1.0), 0.0)
-            height = max(ratio * plot.height(), 2.0)
-            rects.append((index, QRectF(left, plot.bottom() - height, width, height)))
+            height = max(round(ratio * plot.height()), 3)
+            rects.append((index, QRectF(left, baseline - height, width, height)))
         return rects
 
     def paintEvent(self, event) -> None:
@@ -167,16 +187,18 @@ class ColumnChart(_ChartBase):
 
     def _draw_grid(self, painter: QPainter, plot: QRectF) -> None:
         """Recessive gridlines at quarters, with the axis labelled once each."""
-        pen = QPen(theme.with_alpha(theme.RULE, 150))
-        pen.setWidthF(1.0)
         painter.setFont(self._tick_font())
         for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
-            y = plot.bottom() - fraction * plot.height()
+            # Snapped to a half-pixel so each rule is one crisp row, not two grey ones.
+            y = crisp(plot.bottom() - fraction * plot.height())
+            # The baseline is the axis and reads a step stronger than the guides above it.
+            pen = QPen(theme.with_alpha(theme.RULE, 210 if fraction == 0.0 else 120))
+            pen.setWidthF(1.0)
             painter.setPen(pen)
             painter.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
             painter.setPen(theme.FAINT)
             painter.drawText(
-                QRectF(0, y - 7, LABEL_WIDTH - 6, 14),
+                QRectF(0, y - 7, LABEL_WIDTH - 8, 14),
                 int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
                 f"{int(self.maximum * fraction)}{self.unit}",
             )

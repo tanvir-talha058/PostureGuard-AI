@@ -98,6 +98,12 @@ class CorrectionCard(Card):
         self._eyebrow = eyebrow("Correction")
         self.add(self._eyebrow)
 
+        # The statement is centred in whatever height the card is given. Pinned to the
+        # top it left a large void underneath that read as an unfinished layout; centred,
+        # the space around it reads as deliberate breathing room for the one thing on
+        # this screen the user is meant to act on.
+        self.add_stretch()
+
         self._title = label("In tolerance", "PageTitle")
         self._title.setWordWrap(True)
         self.add(self._title)
@@ -151,11 +157,13 @@ class CorrectionCard(Card):
 class ReadingsStrip(QWidget):
     """The raw measurements, for anyone who wants to see the instrument working."""
 
+    # Notes are kept to one line at the column width. A note that wraps makes its own
+    # tile taller and knocks the whole row's values off a shared baseline.
     COLUMNS = (
-        ("gap", "head_shoulder_gap", "{:.2f}", "ear-to-shoulder, over shoulder width"),
-        ("face", "face_scale", "{:.2f}", "face size, over shoulder width"),
+        ("gap", "head_shoulder_gap", "{:.2f}", "ear-to-shoulder / width"),
+        ("face", "face_scale", "{:.2f}", "face size / width"),
         ("tilt", "eye_roll", "{:+.0f}°", "head roll from level"),
-        ("sink", "shoulder_height", "{:.2f}", "shoulder height in frame"),
+        ("sink", "shoulder_height", "{:.2f}", "shoulder height"),
     )
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -224,8 +232,11 @@ class LiveScreen(QWidget):
         side.setSpacing(S["lg"])
         body.addLayout(side, 2)
 
+        # The correction takes the slack rather than a trailing spacer. Pinning both
+        # cards to their content left a tall void under them beside a 490px video,
+        # which read as a layout that had run out of things to say.
         self.correction = CorrectionCard()
-        side.addWidget(self.correction)
+        side.addWidget(self.correction, 1)
 
         today = Card("Today")
         grid = QGridLayout()
@@ -244,8 +255,7 @@ class LiveScreen(QWidget):
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
         today.add(plain(grid))
-        side.addWidget(today)
-        side.addStretch(1)
+        side.addWidget(today, 0)
 
         readings = Card("Measurements", "The numbers the decisions are made from.")
         self.readings = ReadingsStrip()

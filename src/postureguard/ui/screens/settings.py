@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from datetime import datetime
+
+from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -18,18 +21,28 @@ from PySide6.QtWidgets import (
 from ... import paths, theme
 from ...calibration import Baseline
 from ...config import Config
-from ..widgets import Card, PageHeader, button, label, plain
+from ...metrics import describe
+from ..widgets import Card, PageHeader, button, crisp, label, plain
 
 S = theme.SPACE
 
 
 class Row(QWidget):
-    """A labelled setting: name, one line of consequence, and the control."""
+    """A labelled setting: name, one line of consequence, and the control.
+
+    Rows carry their own top rule and padding rather than relying on the card's
+    spacing. Settings cards stack many rows, and without a separator they run
+    together into one grey wall of text.
+    """
+
+    #: Painted rather than added as a widget, so it spans the full card width and does
+    #: not participate in the row's own layout maths.
+    separator = True
 
     def __init__(self, title: str, explanation: str, control: QWidget) -> None:
         super().__init__()
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, S["md"], 0, S["md"])
         layout.setSpacing(S["lg"])
 
         text = QVBoxLayout()
@@ -45,6 +58,22 @@ class Row(QWidget):
         control.setFixedWidth(210)
         layout.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter)
         self.control = control
+        self._first = False
+
+    def paintEvent(self, event) -> None:
+        if self._first:
+            return
+        painter = QPainter(self)
+        pen = QPen(theme.RULE)
+        pen.setWidthF(1.0)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(0, crisp(0)), QPointF(self.width(), crisp(0)))
+        painter.end()
+
+    def set_first(self) -> None:
+        """The topmost row in a card needs no rule above it."""
+        self._first = True
+        self.update()
 
 
 class SliderRow(Row):
@@ -79,6 +108,28 @@ class SliderRow(Row):
         self.slider.valueChanged.connect(
             lambda v: self._readout.setText(self._formatter(v))
         )
+
+
+def _when(stamp: str) -> str:
+    """An ISO UTC timestamp as something a person would say.
+
+    The stored value is UTC with an offset suffix; showing it raw puts "+00:00" in
+    front of the user and reports the wrong hour for anyone outside UTC.
+    """
+    if not stamp:
+        return "at an unknown time"
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except ValueError:
+        return "at an unknown time"
+    if moment.tzinfo is not None:
+        moment = moment.astimezone()
+    today = datetime.now(moment.tzinfo).date()
+    if moment.date() == today:
+        return f"today at {moment.strftime('%H:%M')}"
+    if (today - moment.date()).days == 1:
+        return f"yesterday at {moment.strftime('%H:%M')}"
+    return moment.strftime("on %d %b at %H:%M")
 
 
 def _sensitivity_words(value: int) -> str:
@@ -317,8 +368,7 @@ class SettingsScreen(QWidget):
                 "No baseline yet. The Live screen will capture one the first time it sees you."
             )
             return
-        captured = baseline.captured_at.replace("T", " ") or "an unknown time"
-        measured = ", ".join(sorted(baseline.values)) or "nothing"
         self._baseline_note.setText(
-            f"Captured {captured} from {baseline.sample_count} frames.\nMeasuring: {measured}."
+            f"Captured {_when(baseline.captured_at)} from {baseline.sample_count} frames. "
+            f"Tracking your {describe(baseline.values)}."
         )

@@ -37,6 +37,14 @@ def label(text: str, role: str, parent: QWidget | None = None) -> QLabel:
     widget.setObjectName(role)
     if role in _WRAPPING_ROLES:
         widget.setWordWrap(True)
+        # A wrapped QLabel does not tell its layout that its height depends on its
+        # width unless the size policy says so. Without this, Qt sizes it from a
+        # guessed width and reserves two or three lines for text that occupies one —
+        # which is where the app's excess vertical space was coming from.
+        policy = widget.sizePolicy()
+        policy.setHeightForWidth(True)
+        policy.setVerticalPolicy(QSizePolicy.Policy.Minimum)
+        widget.setSizePolicy(policy)
     return widget
 
 
@@ -58,6 +66,16 @@ def spacer(width: int = 0, height: int = 0) -> QWidget:
     if width == 0:
         widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     return widget
+
+
+def crisp(value: float) -> float:
+    """Snap a coordinate to a half-pixel so a 1px stroke lands on one pixel.
+
+    Qt centres a stroke on its path. A 1px line drawn at an integer coordinate with
+    antialiasing on therefore straddles two pixel rows and renders as two grey lines
+    instead of one solid one — the single most common reason a dark UI looks soft.
+    """
+    return round(value) + 0.5
 
 
 def plain(layout) -> QWidget:
@@ -118,8 +136,17 @@ class Card(QFrame):
         self.body = QVBoxLayout()
         self.body.setSpacing(S["md"])
         self._outer.addLayout(self.body)
+        self._has_separated_rows = False
 
     def add(self, widget: QWidget, stretch: int = 0) -> QWidget:
+        # Widgets that draw their own separator rule supply their own vertical padding,
+        # so the card must not add spacing on top — that would double the gap and leave
+        # the rule floating between two blocks instead of dividing them.
+        if getattr(widget, "separator", False):
+            if not self._has_separated_rows:
+                self._has_separated_rows = True
+                self.body.setSpacing(0)
+                widget.set_first()
         self.body.addWidget(widget, stretch)
         return widget
 
@@ -131,11 +158,22 @@ class Card(QFrame):
         self.body.addStretch(1)
 
 
+#: Fixed row heights, so a column of tiles shares one baseline whether or not each
+#: tile happens to have a note. Letting them size to content is what makes a stat row
+#: look subtly crooked — the values drift by a few pixels against each other.
+CAPTION_HEIGHT = 13
+VALUE_HEIGHT = 38
+NOTE_HEIGHT = 17
+
+
 class StatTile(QWidget):
     """One number, its unit, and what it means.
 
     The label sits *above* the value. A number you have to read before you know what it
     measures is a number you read twice.
+
+    Every row is a fixed height and the note slot is always reserved, so tiles align to
+    a shared grid across a row regardless of what they contain.
     """
 
     def __init__(
@@ -149,24 +187,32 @@ class StatTile(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(0)
 
         self._caption = eyebrow(caption)
+        self._caption.setFixedHeight(CAPTION_HEIGHT)
         layout.addWidget(self._caption)
 
         row = QHBoxLayout()
-        row.setSpacing(S["xs"])
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(3)
+        # Baseline-align the unit to the number rather than centring it, so "%" sits
+        # on the digits' baseline the way it would if they were one piece of text.
         row.setAlignment(Qt.AlignmentFlag.AlignBottom)
         self._value = label(value, "Metric")
+        self._value.setFixedHeight(VALUE_HEIGHT)
         row.addWidget(self._value)
         self._unit = label(unit, "MetricUnit")
+        self._unit.setContentsMargins(0, 0, 0, 7)
         row.addWidget(self._unit)
         row.addStretch(1)
         layout.addLayout(row)
 
+        # Always present, never wrapping. A note that wraps to a second line pushes its
+        # own tile taller and breaks the row it belongs to.
         self._note = label(note, "Body")
-        self._note.setWordWrap(True)
-        self._note.setVisible(bool(note))
+        self._note.setWordWrap(False)
+        self._note.setFixedHeight(NOTE_HEIGHT)
         layout.addWidget(self._note)
 
     def set_value(self, value: str, unit: str | None = None, note: str | None = None) -> None:
@@ -174,8 +220,13 @@ class StatTile(QWidget):
         if unit is not None:
             self._unit.setText(unit)
         if note is not None:
-            self._note.setText(note)
-            self._note.setVisible(bool(note))
+            # Elided, not wrapped — the slot is one line tall by construction.
+            metrics = self._note.fontMetrics()
+            width = max(self._note.width(), 80)
+            self._note.setText(
+                metrics.elidedText(note, Qt.TextElideMode.ElideRight, width)
+            )
+            self._note.setToolTip(note if note else "")
 
     def set_tone(self, role: str) -> None:
         """Recolour the value: StatusGood, StatusWarn, StatusFault, or Metric.

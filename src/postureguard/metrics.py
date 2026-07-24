@@ -56,6 +56,29 @@ class PostureMetrics:
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
 
+#: Human names for the metrics, for anywhere a user reads them. Field names are for
+#: code; "head_shoulder_gap" in an interface is the implementation leaking out.
+METRIC_LABELS: dict[str, str] = {
+    "head_shoulder_gap": "head position",
+    "face_scale": "head distance",
+    "screen_distance": "screen distance",
+    "shoulder_roll": "shoulder line",
+    "eye_roll": "head tilt",
+    "torso_angle": "torso lean",
+    "shoulder_height": "seated height",
+}
+
+
+def describe(names) -> str:
+    """A readable list of metric names, in the order they are defined above."""
+    ordered = [METRIC_LABELS[n] for n in METRIC_LABELS if n in set(names)]
+    if not ordered:
+        return "nothing yet"
+    if len(ordered) == 1:
+        return ordered[0]
+    return ", ".join(ordered[:-1]) + f" and {ordered[-1]}"
+
+
 @dataclass(frozen=True)
 class _Vec:
     x: float

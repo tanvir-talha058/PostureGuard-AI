@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -36,6 +37,10 @@ class ExerciseCard(Card):
     def __init__(self, exercise: Exercise, parent: QWidget | None = None) -> None:
         super().__init__(parent=parent)
         self.exercise = exercise
+        # Hug the content. In a stacked list the trailing spacer should absorb the
+        # slack; without this the cards share it out and each grows a dead band under
+        # its own Start button.
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
         top = QHBoxLayout()
         top.setSpacing(S["sm"])
@@ -52,19 +57,30 @@ class ExerciseCard(Card):
         top.addWidget(duration)
         self.add(plain(top))
 
+        # One block at a tight internal rhythm, not one card-body child per step.
+        # At the card's 12px body spacing a four-step routine ran to 480px, which
+        # reads as four unrelated statements rather than one sequence.
+        steps = QVBoxLayout()
+        steps.setContentsMargins(0, S["xs"], 0, 0)
+        steps.setSpacing(7)
         for index, step in enumerate(exercise.steps, start=1):
             row = QHBoxLayout()
-            row.setSpacing(S["sm"])
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(S["md"])
             # Numbered because these genuinely are a sequence — the order is the
             # instruction, not decoration.
             number = label(f"{index}", "Eyebrow")
-            number.setFixedWidth(14)
-            number.setAlignment(Qt.AlignmentFlag.AlignTop)
+            number.setFixedWidth(12)
+            # Nudged down to sit on the first text line's baseline; the eyebrow is a
+            # smaller face, so top-aligning the boxes leaves the digit visibly high.
+            number.setContentsMargins(0, 3, 0, 0)
+            number.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
             row.addWidget(number)
             text = label(step, "Body")
             text.setWordWrap(True)
             row.addWidget(text, 1)
-            self.add(plain(row))
+            steps.addLayout(row)
+        self.add(plain(steps))
 
         start = button("Start")
         start.clicked.connect(lambda: self.started.emit(self.exercise))
