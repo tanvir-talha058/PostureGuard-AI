@@ -54,6 +54,22 @@ Hips are routinely hidden by a desk. When they are, `torso_angle` is reported as
 unavailable rather than as a plausible-looking zero, and the spine check falls back to
 how far the shoulders have sunk.
 
+## The mini window
+
+A small always-on-top panel, on by default, showing the live skeleton, the tolerance
+band, the current fault with its fix, and the raw measurements. This is the surface that
+actually changes posture — the main window is where you go to *look* at your posture,
+but the mini window is what is in front of you at the moment you are getting it wrong.
+
+It stays calm while you are fine and earns attention only as a fault is ignored: the
+border brightens and breathes once escalation begins, and a `HELD 68S` readout says why.
+
+- **Drag** it anywhere; the position is remembered, and clamped back on-screen if you
+  unplug a monitor.
+- **Double-click** to open the main window.
+- **Right-click** for open / snooze / recalibrate / hide.
+- Toggle from the tray, the Live screen, or Settings → Interventions.
+
 ## The intervention ladder
 
 1. **Overlay cue** — the offending joints turn red and a specific instruction appears.
@@ -103,7 +119,7 @@ they are unit-tested against synthetic poses. Everything else is verified by run
 ## Development
 
 ```bash
-.venv/Scripts/python -m pytest          # 154 tests
+.venv/Scripts/python -m pytest          # 166 tests
 python tools/preview_app.py             # render every screen with seeded data
 python tools/preview_overlay.py         # render the compact overlay states
 ```

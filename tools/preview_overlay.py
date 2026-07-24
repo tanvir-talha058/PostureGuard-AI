@@ -93,6 +93,7 @@ def main() -> int:
             aspect=ASPECT, status="in_tolerance",
         ),
         "03-forward-head": None,
+        "05-escalated": None,
         "04-searching": ViewModel(
             frame=frame, landmarks=None, baseline=baseline,
             aspect=ASPECT, status="searching", message="Step into view",
@@ -106,6 +107,14 @@ def main() -> int:
     states["03-forward-head"] = ViewModel(
         frame=frame, landmarks=craning, metrics=craning_metrics,
         faults=faults, baseline=baseline, aspect=ASPECT, status="fault",
+        urgency=1, held_seconds=6.0,
+    )
+    # The same fault after it has been ignored long enough to escalate: brighter
+    # border, and the held time explains why the panel started asking louder.
+    states["05-escalated"] = ViewModel(
+        frame=frame, landmarks=craning, metrics=craning_metrics,
+        faults=faults, baseline=baseline, aspect=ASPECT, status="fault",
+        urgency=3, held_seconds=68.0,
     )
 
     overlay = PostureOverlay(FAST)

@@ -43,6 +43,8 @@ class Intervention:
     dim_progress: float = 0.0
     #: True on the frame a toast should actually be shown.
     toast_now: bool = False
+    #: How long the current fault has gone uncorrected. Zero when posture is fine.
+    held_seconds: float = 0.0
 
 
 class Escalator:
@@ -103,10 +105,10 @@ class Escalator:
         held_for = now - self._fault_since
 
         if self.is_suppressed(now) or not self.alerts_enabled:
-            return Intervention(level=Level.CUE, fault=primary)
+            return Intervention(level=Level.CUE, fault=primary, held_seconds=held_for)
 
         if held_for < self.toast_after_seconds:
-            return Intervention(level=Level.CUE, fault=primary)
+            return Intervention(level=Level.CUE, fault=primary, held_seconds=held_for)
 
         toast_now = False
         if not self._toasted_this_episode:
@@ -122,11 +124,14 @@ class Escalator:
             self._toasted_this_episode = True
 
         if not self.dim_enabled or held_for < self.dim_after_seconds:
-            return Intervention(level=Level.TOAST, fault=primary, toast_now=toast_now)
+            return Intervention(
+                level=Level.TOAST, fault=primary, toast_now=toast_now, held_seconds=held_for
+            )
 
         # Ramp in rather than snapping to full dim — an abrupt darkening reads as a
         # fault in the machine, not a prompt to sit up.
         progress = min((held_for - self.dim_after_seconds) / max(self.dim_ramp_seconds, 0.1), 1.0)
         return Intervention(
-            level=Level.DIM, fault=primary, dim_progress=progress, toast_now=toast_now
+            level=Level.DIM, fault=primary, dim_progress=progress,
+            toast_now=toast_now, held_seconds=held_for,
         )

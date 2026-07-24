@@ -175,6 +175,17 @@ class SettingsScreen(QWidget):
             "Interventions",
             "The overlay cue is always on. These control what happens when it is ignored.",
         )
+        self.mini_window = QCheckBox("Enabled")
+        self.mini_window.setChecked(config.mini_window)
+        alerts.add(
+            Row(
+                "Mini window",
+                "A small always-on-top readout showing live posture and the current "
+                "fix. Drag it anywhere; double-click to open this window.",
+                self.mini_window,
+            )
+        )
+
         self.alerts_enabled = QCheckBox("Enabled")
         self.alerts_enabled.setChecked(config.alerts_enabled)
         alerts.add(Row("Notifications", "A prompt naming the fault and the fix.", self.alerts_enabled))
@@ -260,7 +271,10 @@ class SettingsScreen(QWidget):
             self.dim_after, self.dim_opacity,
         ):
             slider_row.slider.valueChanged.connect(self._emit)
-        for check in (self.alerts_enabled, self.dim_enabled, self.mirror, self.breaks_enabled):
+        for check in (
+            self.alerts_enabled, self.dim_enabled, self.mirror,
+            self.breaks_enabled, self.mini_window,
+        ):
             check.toggled.connect(self._emit)
         for spin in (self.break_interval, self.snooze_minutes):
             spin.valueChanged.connect(self._emit)
@@ -284,6 +298,12 @@ class SettingsScreen(QWidget):
             snooze_minutes=self.snooze_minutes.value(),
             breaks_enabled=self.breaks_enabled.isChecked(),
             break_interval_minutes=self.break_interval.value(),
+            mini_window=self.mini_window.isChecked(),
+            # Carried through, not rebuilt. This constructor rebuilds Config from the
+            # visible controls, so any field without one here silently reverts to its
+            # default — which would throw away the mini window's saved position.
+            mini_x=self.config.mini_x,
+            mini_y=self.config.mini_y,
             start_minimized=self.config.start_minimized,
             launch_at_login=self.config.launch_at_login,
         )

@@ -79,6 +79,23 @@ class TestToastDiscipline:
         assert escalator.update(CRANING, now=111).toast_now is True
 
 
+class TestHeldTime:
+    def test_reports_how_long_the_fault_has_been_held(self):
+        escalator = ladder()
+        escalator.update(CRANING, now=0)
+        assert escalator.update(CRANING, now=14).held_seconds == pytest.approx(14)
+
+    def test_held_time_is_zero_when_posture_is_fine(self):
+        assert ladder().update(CLEAR, now=99).held_seconds == 0.0
+
+    def test_held_time_restarts_after_a_correction(self):
+        escalator = ladder()
+        escalator.update(CRANING, now=0)
+        escalator.update(CRANING, now=30)
+        escalator.update(CLEAR, now=31)
+        assert escalator.update(CRANING, now=32).held_seconds == pytest.approx(0)
+
+
 class TestQuiet:
     def test_drift_alone_never_escalates_past_the_cue(self):
         """A ten-minute average is not grounds for dimming someone's screen."""

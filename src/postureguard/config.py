@@ -40,6 +40,14 @@ class Config:
     breaks_enabled: bool = True
     break_interval_minutes: int = 40
 
+    # --- mini window ---
+    #: The compact always-on-top readout. On by default: it is the surface that makes
+    #: correction possible while you are working, rather than when you go looking.
+    mini_window: bool = True
+    #: Last position on screen. -1 means "not placed yet, put it bottom-right".
+    mini_x: int = -1
+    mini_y: int = -1
+
     # --- app ---
     start_minimized: bool = False
     launch_at_login: bool = False

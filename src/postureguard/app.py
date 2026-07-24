@@ -13,6 +13,7 @@ from . import paths
 from .alerts import DimOverlay, Toast, app_icon
 from .config import Config
 from .session import SessionStore
+from .overlay import PostureOverlay, ViewModel
 from .ui.controller import MonitorController
 from .ui.design import stylesheet
 from .ui.screens.exercises import ExercisesScreen
@@ -37,6 +38,7 @@ class Application:
         self.window = MainWindow()
         self.toast = Toast()
         self.dim = DimOverlay(config.dim_max_opacity)
+        self.mini = PostureOverlay(config.thresholds())
 
         self.live = LiveScreen(config.thresholds(), self.store)
         self.history = HistoryScreen(self.store)
@@ -57,6 +59,13 @@ class Application:
     def _connect(self) -> None:
         self.controller.updated.connect(self.window.on_state)
         self.controller.updated.connect(self.live.on_state)
+        self.controller.updated.connect(self._update_mini)
+
+        self.mini.open_requested.connect(self._show_window)
+        self.mini.snooze_requested.connect(lambda: self.controller.snooze())
+        self.mini.recalibrate_requested.connect(self.controller.recalibrate)
+        self.mini.hide_requested.connect(self._hide_mini)
+        self.mini.moved.connect(self._remember_mini_position)
         self.controller.toast_requested.connect(self.toast.present)
         self.controller.dim_changed.connect(self.dim.set_progress)
         self.controller.break_due.connect(self._on_break_due)
@@ -65,6 +74,7 @@ class Application:
 
         self.live.snooze_requested.connect(self.controller.snooze)
         self.live.recalibrate_requested.connect(self.controller.recalibrate)
+        self.live.mini_toggled.connect(self.toggle_mini)
         self.toast.snoozed.connect(self.controller.snooze)
         self.exercises.break_taken.connect(self.controller.breaks.taken)
 
@@ -84,6 +94,12 @@ class Application:
         show = QAction("Open PostureGuard", menu)
         show.triggered.connect(self._show_window)
         menu.addAction(show)
+
+        self._mini_action = QAction("Show mini window", menu)
+        self._mini_action.setCheckable(True)
+        self._mini_action.setChecked(self.config.mini_window)
+        self._mini_action.triggered.connect(self.set_mini_visible)
+        menu.addAction(self._mini_action)
 
         snooze = QAction("Snooze alerts", menu)
         snooze.triggered.connect(lambda: self.controller.snooze())
@@ -128,10 +144,68 @@ class Application:
         self.controller.apply_config(config)
         self.dim.max_opacity = config.dim_max_opacity
         self.live.video.thresholds = config.thresholds()
+        self.mini.thresholds = config.thresholds()
 
     def _on_recalibrate_from_settings(self) -> None:
         self.controller.recalibrate()
         self.window.show_screen("live")
+
+    # --- mini window ---------------------------------------------------------------
+
+    def _update_mini(self, state) -> None:
+        if not self.mini.isVisible():
+            return
+        self.mini.show_model(
+            ViewModel(
+                frame=state.frame,
+                landmarks=state.reading.landmarks,
+                metrics=state.reading.metrics,
+                faults=state.reading.faults,
+                baseline=state.reading.baseline,
+                aspect=state.aspect,
+                status=state.reading.status,
+                message=state.reading.message,
+                urgency=int(state.intervention.level),
+                held_seconds=state.intervention.held_seconds,
+            )
+        )
+
+    def _place_mini(self) -> None:
+        """Restore the saved corner, or default to bottom-right on first run."""
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        x, y = self.config.mini_x, self.config.mini_y
+        if x < 0 or y < 0:
+            x = area.right() - self.mini.width() - 24
+            y = area.bottom() - self.mini.height() - 24
+        # A saved position can land off-screen when a monitor is unplugged. Clamp it
+        # back into view rather than leaving the window unreachable.
+        x = max(area.left(), min(x, area.right() - self.mini.width()))
+        y = max(area.top(), min(y, area.bottom() - self.mini.height()))
+        self.mini.move(x, y)
+
+    def _remember_mini_position(self, x: int, y: int) -> None:
+        self.config.mini_x, self.config.mini_y = x, y
+        self.config.save(paths.config_path())
+
+    def set_mini_visible(self, visible: bool) -> None:
+        if visible:
+            self._place_mini()
+            self.mini.show()
+        else:
+            self.mini.hide()
+        self.config.mini_window = visible
+        self.config.save(paths.config_path())
+        self._mini_action.setChecked(visible)
+        self.live.set_mini_shown(visible)
+
+    def _hide_mini(self) -> None:
+        self.set_mini_visible(False)
+
+    def toggle_mini(self) -> None:
+        self.set_mini_visible(not self.mini.isVisible())
 
     def _on_window_closed(self) -> None:
         # Say so once. Silently continuing to watch someone through their webcam after
@@ -151,6 +225,10 @@ class Application:
     def start(self) -> bool:
         if not self.controller.start():
             return False
+        if self.config.mini_window:
+            self._place_mini()
+            self.mini.show()
+        self.live.set_mini_shown(self.config.mini_window)
         if not self.config.start_minimized:
             self.window.show()
         return True
@@ -168,6 +246,7 @@ class Application:
         self.controller.stop()
         self.dim.hide()
         self.toast.hide()
+        self.mini.hide()
         self.store.close()
 
 

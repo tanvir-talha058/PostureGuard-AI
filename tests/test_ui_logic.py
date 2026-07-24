@@ -117,6 +117,88 @@ class TestLayoutInvariants:
         assert header.minimumSizeHint().width() < 600
 
 
+class TestSettingsRoundTrip:
+    """_emit rebuilds Config from the visible controls, so any field without a control
+    silently reverts to its default. These pin the ones that have no control."""
+
+    def test_changing_a_setting_preserves_the_mini_window_position(self, qt_app):
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings import SettingsScreen
+
+        screen = SettingsScreen(Config(mini_x=1200, mini_y=40))
+        captured = []
+        screen.changed.connect(captured.append)
+        screen.sensitivity.slider.setValue(150)
+
+        assert captured, "moving a slider should emit a config change"
+        assert (captured[-1].mini_x, captured[-1].mini_y) == (1200, 40)
+
+    def test_changing_a_setting_preserves_unexposed_app_settings(self, qt_app):
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings import SettingsScreen
+
+        screen = SettingsScreen(Config(start_minimized=True, launch_at_login=True))
+        captured = []
+        screen.changed.connect(captured.append)
+        screen.sensitivity.slider.setValue(120)
+
+        assert captured[-1].start_minimized is True
+        assert captured[-1].launch_at_login is True
+
+    def test_building_the_screen_emits_nothing(self, qt_app):
+        """Populating controls fires their signals; startup must not look like edits."""
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings import SettingsScreen
+
+        captured = []
+        screen = SettingsScreen(Config())
+        screen.changed.connect(captured.append)
+        assert captured == []
+
+
+class TestMiniWindow:
+    def test_drift_is_never_the_instruction(self, qt_app):
+        """Drift describes ten minutes of history and has no immediate action."""
+        from postureguard.overlay import ViewModel
+        from postureguard.rules import Fault, FaultKind
+
+        drift = Fault(FaultKind.DRIFT, 2.0, "You have been sinking.", ())
+        craning = Fault(FaultKind.FORWARD_HEAD, 1.2, "Chin back.", ())
+        model = ViewModel(faults=[drift, craning])
+        assert model.primary_fault is craning
+
+    def test_drift_alone_is_still_shown_if_it_is_all_there_is(self, qt_app):
+        from postureguard.overlay import ViewModel
+        from postureguard.rules import Fault, FaultKind
+
+        drift = Fault(FaultKind.DRIFT, 2.0, "You have been sinking.", ())
+        assert ViewModel(faults=[drift]).primary_fault is drift
+
+    def test_the_attention_pulse_only_runs_while_escalating(self, qt_app):
+        """A border animation running all day is wasted repainting."""
+        from postureguard.overlay import PostureOverlay, ViewModel
+
+        overlay = PostureOverlay()
+        overlay.show_model(ViewModel(urgency=0))
+        assert not overlay._pulse_timer.isActive()
+        overlay.show_model(ViewModel(urgency=2))
+        assert overlay._pulse_timer.isActive()
+        overlay.show_model(ViewModel(urgency=0))
+        assert not overlay._pulse_timer.isActive()
+
+    def test_faulty_joints_are_collected_from_every_active_fault(self, qt_app):
+        from postureguard.overlay import ViewModel
+        from postureguard.rules import Fault, FaultKind
+
+        model = ViewModel(
+            faults=[
+                Fault(FaultKind.FORWARD_HEAD, 1.0, "", ("left_ear",)),
+                Fault(FaultKind.LATERAL_TILT, 1.0, "", ("left_eye",)),
+            ]
+        )
+        assert model.faulty_joints == frozenset({"left_ear", "left_eye"})
+
+
 class TestStatTile:
     def test_recolouring_preserves_the_metric_type_role(self, qt_app):
         """Swapping objectName used to drop the font and leave a tiny number."""

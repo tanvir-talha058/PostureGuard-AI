@@ -191,6 +191,7 @@ class LiveScreen(QWidget):
 
     snooze_requested = Signal()
     recalibrate_requested = Signal()
+    mini_toggled = Signal()
 
     def __init__(self, thresholds: Thresholds, store: SessionStore) -> None:
         super().__init__()
@@ -201,6 +202,9 @@ class LiveScreen(QWidget):
         layout.setSpacing(S["lg"])
 
         header = PageHeader("Live monitor", "Your posture, measured against your own baseline.")
+        self._mini = button("Mini window")
+        self._mini.clicked.connect(self.mini_toggled)
+        header.add_action(self._mini)
         self._snooze = button("Snooze")
         self._snooze.clicked.connect(self.snooze_requested)
         header.add_action(self._snooze)
@@ -266,6 +270,10 @@ class LiveScreen(QWidget):
         if state.session_seconds - self._since_refresh >= 5.0:
             self._since_refresh = state.session_seconds
             self.refresh()
+
+    def set_mini_shown(self, shown: bool) -> None:
+        """Keep the button naming the action it performs, not the current state."""
+        self._mini.setText("Hide mini window" if shown else "Mini window")
 
     def refresh(self) -> None:
         summary = self.store.today()

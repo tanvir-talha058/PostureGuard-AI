@@ -56,6 +56,17 @@ class TestPersistence:
         loaded = Config.load(path)
         assert loaded.sensitivity == 1.5
 
+    def test_mini_window_settings_round_trip(self, tmp_path):
+        path = tmp_path / "config.json"
+        Config(mini_window=False, mini_x=1200, mini_y=40).save(path)
+        loaded = Config.load(path)
+        assert loaded.mini_window is False
+        assert (loaded.mini_x, loaded.mini_y) == (1200, 40)
+
+    def test_mini_window_is_on_by_default_and_unplaced(self):
+        assert Config().mini_window is True
+        assert Config().mini_x == -1 and Config().mini_y == -1
+
     def test_a_json_file_that_is_not_an_object_yields_defaults(self, tmp_path):
         path = tmp_path / "config.json"
         path.write_text("[1, 2, 3]", encoding="utf-8")
