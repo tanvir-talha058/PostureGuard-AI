@@ -189,8 +189,9 @@ class ColumnChart(_ChartBase):
         """Recessive gridlines at quarters, with the axis labelled once each."""
         painter.setFont(self._tick_font())
         for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
-            # Snapped to a half-pixel so each rule is one crisp row, not two grey ones.
-            y = crisp(plot.bottom() - fraction * plot.height())
+            # Rounded in physical-pixel space so each rule stays one crisp row rather
+            # than two grey ones once the display is scaled above 100%.
+            y = crisp(plot.bottom() - fraction * plot.height(), self.devicePixelRatioF())
             # The baseline is the axis and reads a step stronger than the guides above it.
             pen = QPen(theme.with_alpha(theme.RULE, 210 if fraction == 0.0 else 120))
             pen.setWidthF(1.0)

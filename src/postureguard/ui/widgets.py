@@ -68,14 +68,23 @@ def spacer(width: int = 0, height: int = 0) -> QWidget:
     return widget
 
 
-def crisp(value: float) -> float:
-    """Snap a coordinate to a half-pixel so a 1px stroke lands on one pixel.
+def crisp(value: float, dpr: float = 1.0) -> float:
+    """Snap a logical-space coordinate so a 1px stroke lands on one *physical* pixel.
 
-    Qt centres a stroke on its path. A 1px line drawn at an integer coordinate with
-    antialiasing on therefore straddles two pixel rows and renders as two grey lines
-    instead of one solid one — the single most common reason a dark UI looks soft.
+    Qt centres a stroke on its path, and paints in logical coordinates — but the
+    screen rasterizes in physical pixels, `dpr` of them per logical unit. At dpr=1
+    a flat +0.5 is enough, which is all this used to do. At a fractional dpr (this
+    project's own dev display reports 1.5), that stops being true: logical y=1 lands
+    at physical y=1.5, already half a physical pixel off before any correction is
+    even applied, and a flat logical +0.5 does not land back on a physical boundary
+    in general. Rounding has to happen in physical space and then convert back.
+
+    Pass the painting widget's own `devicePixelRatioF()` — omitting it silently
+    reproduces the old DPR-1-only behaviour, which is a real, live bug on any
+    display scaled above 100%, not a hypothetical one.
     """
-    return round(value) + 0.5
+    physical = round(value * dpr) + 0.5
+    return physical / dpr
 
 
 def plain(layout) -> QWidget:
@@ -146,6 +155,11 @@ class Card(QFrame):
             if not self._has_separated_rows:
                 self._has_separated_rows = True
                 self.body.setSpacing(0)
+            # Suppressing the top rule is only correct when this row is literally
+            # the first thing in the card. A card that opens with a plain label
+            # before its first Row (Privacy does) must still draw that row's rule —
+            # otherwise the label and the row run together with no line between them.
+            if self.body.count() == 0:
                 widget.set_first()
         self.body.addWidget(widget, stretch)
         return widget

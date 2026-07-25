@@ -47,6 +47,8 @@ SERIES = [
 STATE_COLORS = {
     "calibrating": MUTED,
     "searching": MUTED,
+    "camera_lost": WARNING,
+    "paused": MUTED,
     "in_tolerance": IN_TOLERANCE,
     "drifting": WARNING,
     "fault": FAULT,

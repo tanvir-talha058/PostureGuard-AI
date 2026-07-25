@@ -42,6 +42,27 @@ class VideoView(QWidget):
         painter.fillRect(rect, QColor("#0C0E12"))
 
         state = self.state
+        if state is not None and state.paused:
+            # Distinct from the camera-lost message: this is expected behaviour, not
+            # a problem to fix, so it says why and how to end it rather than telling
+            # the user to check a device that is fine.
+            self._note(
+                painter, rect,
+                "Paused — no activity detected.\nMove the mouse or unlock to resume.",
+            )
+            self._frame(painter, rect)
+            painter.end()
+            return
+
+        if state is not None and not state.camera_healthy:
+            self._note(
+                painter, rect,
+                "Camera disconnected — trying to reconnect.\nNothing is being monitored.",
+            )
+            self._frame(painter, rect)
+            painter.end()
+            return
+
         if state is None or state.frame is None:
             self._note(painter, rect, "Waiting for camera")
             self._frame(painter, rect)
@@ -85,7 +106,11 @@ class VideoView(QWidget):
     def _note(self, painter: QPainter, rect: QRectF, text: str) -> None:
         painter.setFont(theme.cue_font())
         painter.setPen(theme.with_alpha(theme.BONE, 190))
-        painter.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), text)
+        painter.drawText(
+            rect,
+            int(Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap),
+            text,
+        )
 
 
 class CorrectionCard(Card):
@@ -119,6 +144,28 @@ class CorrectionCard(Card):
 
     def set_reading(self, state: LiveState) -> None:
         reading = state.reading
+
+        if state.paused:
+            self._show(
+                "Paused",
+                "No activity detected, so monitoring stopped and the camera was "
+                "released. Move the mouse or unlock to resume.",
+                theme.MUTED,
+                "Status",
+            )
+            return
+
+        if not state.camera_healthy:
+            # Named as a setup problem, not a posture one, and explicit that monitoring
+            # has stopped — the failure this screen must never hide.
+            self._show(
+                "Camera disconnected",
+                "Reconnect the camera or pick another in Settings. "
+                "Nothing is being monitored until it returns.",
+                theme.WARNING,
+                "Status",
+            )
+            return
 
         if state.calibrating:
             self._show("Calibrating", reading.message or "Hold still.", theme.MUTED, "Setup")

@@ -8,24 +8,28 @@ Deliberately narrow and quiet. Something that sits in peripheral vision for eigh
 cannot afford to be loud, or it gets closed by lunchtime — so it stays calm while you
 are fine, and earns attention only as a fault is ignored.
 
-Reading order is fixed and never rearranges — status, view, instruction, readings —
-so the eye learns where to look and can check posture in a glance rather than a read.
+No camera feed here, by design — not just for the collapsed bar but in this window's
+only other state. The camera view and skeleton belong to the main window, where you go
+to look at your posture; this window exists for the moment you are *not* looking at it,
+and a live self-view sitting in peripheral vision all day is a webcam-on-desktop
+experience nobody wants regardless of what it's showing. What this window says instead
+is the two things that fit that moment: what is wrong, and what to do about it.
+
+Reading order is fixed and never rearranges — status, instruction, readings — so the
+eye learns where to look and can check posture in a glance rather than a read.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QMouseEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QMenu, QWidget
 
-from . import render, theme
-from .calibration import Baseline
-from .landmarks import Landmarks
+from . import theme
 from .metrics import PostureMetrics
-from .rules import Fault, FaultKind, Thresholds
+from .rules import Fault, FaultKind
 
 HEADER_HEIGHT = 30
 FAULT_HEIGHT = 68
@@ -42,6 +46,8 @@ STATUS_LABELS = {
     "starting": "STARTING",
     "calibrating": "CALIBRATING",
     "searching": "NO SUBJECT",
+    "camera_lost": "CAMERA LOST",
+    "paused": "PAUSED",
     "in_tolerance": "IN TOLERANCE",
     "drifting": "DRIFTING",
     "fault": "OUT OF TOLERANCE",
@@ -51,14 +57,14 @@ STATUS_LABELS = {
 
 @dataclass
 class ViewModel:
-    """Everything the panel draws, assembled by the app each frame."""
+    """Everything the panel draws, assembled by the app each frame.
 
-    frame: np.ndarray | None = None
-    landmarks: Landmarks | None = None
+    No frame, landmarks or baseline: this panel never shows the camera, so it never
+    needs them. The main window's own view (ui/screens/live.py) carries those.
+    """
+
     metrics: PostureMetrics = field(default_factory=PostureMetrics)
     faults: list[Fault] = field(default_factory=list)
-    baseline: Baseline | None = None
-    aspect: float = 4 / 3
     status: str = "starting"
     message: str = ""
     #: Escalation rung, 0-3. Drives how insistent the panel allows itself to be.
@@ -74,10 +80,6 @@ class ViewModel:
             return actionable[0]
         return self.faults[0] if self.faults else None
 
-    @property
-    def faulty_joints(self) -> frozenset[str]:
-        return frozenset(j for fault in self.faults for j in fault.joints)
-
 
 class PostureOverlay(QWidget):
     """Frameless, always-on-top posture readout."""
@@ -89,20 +91,16 @@ class PostureOverlay(QWidget):
     moved = Signal(int, int)
     collapsed_changed = Signal(bool)
 
-    def __init__(self, thresholds: Thresholds | None = None, collapsed: bool = False) -> None:
+    def __init__(self, collapsed: bool = False, always_on_top: bool = True) -> None:
         super().__init__()
-        self.thresholds = thresholds or Thresholds()
         self.model = ViewModel()
         self._drag_origin: QPoint | None = None
         self._pulse = 0.0
         self._collapsed = collapsed
+        self._always_on_top = always_on_top
 
         self.setWindowTitle("PostureGuard")
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
-        )
+        self._apply_window_flags()
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._apply_size()
         self.setToolTip(
@@ -124,7 +122,7 @@ class PostureOverlay(QWidget):
         return self._collapsed
 
     def _apply_size(self) -> None:
-        full = HEADER_HEIGHT + theme.VIDEO_HEIGHT + FAULT_HEIGHT + READINGS_HEIGHT
+        full = HEADER_HEIGHT + FAULT_HEIGHT + READINGS_HEIGHT
         self.setFixedSize(
             theme.PANEL_WIDTH, COLLAPSED_HEIGHT if self._collapsed else full
         )
@@ -144,6 +142,37 @@ class PostureOverlay(QWidget):
 
     def toggle_collapsed(self) -> None:
         self.set_collapsed(not self._collapsed)
+
+    # --- always on top --------------------------------------------------------------
+    #
+    # A posture tool only works if the correction is in front of you at the moment
+    # you need it — a mini window that some other maximized app can bury is a mini
+    # window that stops correcting anything within about ten minutes of use. On by
+    # default for exactly that reason; still a real setting, not hardcoded, because a
+    # user running a full-screen presentation or a game legitimately wants it out of
+    # the way sometimes without having to hide the window entirely.
+
+    @property
+    def always_on_top(self) -> bool:
+        return self._always_on_top
+
+    def _apply_window_flags(self) -> None:
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+        if self._always_on_top:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+
+    def set_always_on_top(self, always_on_top: bool) -> None:
+        if always_on_top == self._always_on_top:
+            return
+        self._always_on_top = always_on_top
+        # Changing window flags on an already-created native window implicitly hides
+        # it (Qt has to recreate the underlying platform window) — reapply visibility
+        # afterward, or the panel silently vanishes the moment the setting is toggled.
+        was_visible = self.isVisible()
+        self._apply_window_flags()
+        if was_visible:
+            self.show()
 
     # --- external API -------------------------------------------------------------
 
@@ -229,7 +258,6 @@ class PostureOverlay(QWidget):
             self._paint_bar(painter, surface)
         else:
             y = self._paint_header(painter)
-            y = self._paint_view(painter, y)
             y = self._paint_instruction(painter, y)
             self._paint_readings(painter, y)
 
@@ -308,8 +336,14 @@ class PostureOverlay(QWidget):
         status = self.model.status
         if status == "calibrating":
             return self.model.message or "Calibrating…"
+        if status == "camera_lost":
+            return "Camera disconnected"
+        if status == "paused":
+            return self.model.message or "Paused — no activity"
         if status == "searching":
-            return "No subject"
+            # The engine already sends "Step into view" here — an instruction, not
+            # just a label — which is exactly the register this panel wants.
+            return self.model.message or "No subject"
         if status == "snoozed":
             return "Alerts snoozed"
         if status == "starting":
@@ -348,55 +382,22 @@ class PostureOverlay(QWidget):
         self._hairline(painter, HEADER_HEIGHT)
         return HEADER_HEIGHT
 
-    def _paint_view(self, painter: QPainter, top: float) -> float:
-        rect = QRectF(0, top, self.width(), theme.VIDEO_HEIGHT)
-        painter.fillRect(rect, QColor("#0C0E12"))
-
-        model = self.model
-        if model.frame is None:
-            self._centred_note(painter, rect, "Waiting for camera")
-            self._hairline(painter, rect.bottom())
-            return rect.bottom()
-
-        transform = render.draw_video(painter, model.frame, rect)
-
-        if model.landmarks is None:
-            self._centred_note(painter, rect, model.message or "Step into view")
-            self._hairline(painter, rect.bottom())
-            return rect.bottom()
-
-        render.draw_plumb_line(painter, model.landmarks, transform)
-        if model.baseline is not None:
-            render.draw_tolerance_band(
-                painter,
-                model.landmarks,
-                transform,
-                model.baseline,
-                self.thresholds,
-                model.aspect,
-                in_tolerance=not model.faults,
-            )
-        render.draw_skeleton(
-            painter, model.landmarks, transform, model.faulty_joints, self.accent
-        )
-
-        # Messages belong in the instruction row and nowhere else. Echoing them over
-        # the video too made the countdown appear twice and obscured the skeleton the
-        # user is being asked to look at.
-        self._hairline(painter, rect.bottom())
-        return rect.bottom()
-
     def _paint_instruction(self, painter: QPainter, top: float) -> float:
         rect = QRectF(0, top, self.width(), FAULT_HEIGHT)
         fault = self.model.primary_fault
 
         if fault is None:
+            # Everything that used to be a message painted over the video — waiting
+            # for the camera, stepping into view, paused, disconnected — now has
+            # nowhere to live but here, so it goes through the same status-to-text
+            # mapping the collapsed bar already uses. One source of truth for what
+            # each resting state says, rather than two copies drifting apart.
             painter.setFont(theme.cue_font())
             painter.setPen(theme.MUTED)
             painter.drawText(
                 rect.adjusted(theme.GUTTER, 0, -theme.GUTTER, 0),
-                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                self.model.message or "Posture is within tolerance.",
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap),
+                self._resting_text(),
             )
             self._hairline(painter, rect.bottom())
             return rect.bottom()
@@ -490,11 +491,7 @@ class PostureOverlay(QWidget):
         pen = QPen(theme.RULE)
         pen.setWidthF(1.0)
         painter.setPen(pen)
-        # Half-pixel offset, or the antialiased 1px stroke smears across two rows.
-        edge = crisp(y)
+        # Rounds in physical-pixel space (via devicePixelRatioF), or the offset that
+        # keeps this crisp at 100% scaling drifts back off the pixel grid at 125%/150%.
+        edge = crisp(y, self.devicePixelRatioF())
         painter.drawLine(QPointF(0, edge), QPointF(self.width(), edge))
-
-    def _centred_note(self, painter: QPainter, rect: QRectF, text: str) -> None:
-        painter.setFont(theme.cue_font())
-        painter.setPen(theme.with_alpha(theme.BONE, 190))
-        painter.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), text)

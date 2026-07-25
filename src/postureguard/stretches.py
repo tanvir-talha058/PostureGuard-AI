@@ -11,8 +11,10 @@ these are mobility drills, not treatment.
 
 from __future__ import annotations
 
+import json
+import time
 from dataclasses import dataclass, field
-from typing import Sequence
+from pathlib import Path
 
 from .rules import FaultKind
 
@@ -188,6 +190,14 @@ def routine_for(dominant: FaultKind | None) -> Routine:
     )
 
 
+#: If the app has been closed longer than this, the accrued progress is treated as
+#: stale rather than resumed. A quick relaunch — a crash, a quick Windows Update
+#: restart — should not cost banked progress; anything longer means the user has
+#: clearly been away, and resuming a countdown from before that gap would credit
+#: time they were not at the desk for.
+BREAK_STATE_STALE_AFTER_SECONDS = 30 * 60
+
+
 class BreakTimer:
     """Counts working time toward the next break.
 
@@ -202,6 +212,54 @@ class BreakTimer:
         self._worked = 0.0
         self._last_tick: float | None = None
         self._due = False
+
+    # --- persistence ----------------------------------------------------------
+    #
+    # `_last_tick` is a `time.monotonic()` value and is deliberately never persisted —
+    # that clock is only meaningful within one process's lifetime, not across a
+    # restart. Only `_worked` (a duration) and a wall-clock save time travel to disk;
+    # the first `update()` call after restore re-establishes `_last_tick` exactly as
+    # it does on a fresh timer.
+
+    def to_state(self) -> dict:
+        return {"worked_seconds": self._worked, "saved_at": time.time()}
+
+    @classmethod
+    def restore(
+        cls,
+        state: dict,
+        interval_minutes: float,
+        enabled: bool,
+        now_wall: float | None = None,
+    ) -> "BreakTimer":
+        timer = cls(interval_minutes, enabled)
+        saved_at = state.get("saved_at")
+        worked = state.get("worked_seconds")
+        if not isinstance(saved_at, (int, float)) or not isinstance(worked, (int, float)):
+            return timer
+        now_wall = time.time() if now_wall is None else now_wall
+        gap = now_wall - saved_at
+        if 0 <= gap <= BREAK_STATE_STALE_AFTER_SECONDS:
+            timer._worked = max(worked, 0.0)
+        return timer
+
+    def save_state(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_state()), encoding="utf-8")
+
+    @classmethod
+    def load_restored(
+        cls, path: Path, interval_minutes: float, enabled: bool
+    ) -> "BreakTimer":
+        """The usual construction path: pick up where a previous run left off,
+        unless it left off long enough ago that doing so would be misleading."""
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return cls(interval_minutes, enabled)
+        if not isinstance(state, dict):
+            return cls(interval_minutes, enabled)
+        return cls.restore(state, interval_minutes, enabled)
 
     def update(self, present: bool, now: float) -> bool:
         """Advance the timer. Returns True on the frame a break becomes due."""

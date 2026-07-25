@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 
 from ... import theme
-from ...rules import FaultKind, FAULT_TITLES
+from ...rules import FAULT_TITLES
 from ...session import SessionStore
-from ..charts import Bar, ColumnChart, RankedBarChart, score_color
-from ..widgets import Card, EmptyState, PageHeader, StatTile, button, label
+from ..charts import Bar, ColumnChart, RankedBarChart
+from ..widgets import Card, EmptyState, PageHeader, StatTile, button
 
 S = theme.SPACE
 

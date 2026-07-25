@@ -43,3 +43,7 @@ def config_path() -> Path:
 
 def database_path() -> Path:
     return data_dir() / "sessions.db"
+
+
+def break_state_path() -> Path:
+    return data_dir() / "break_state.json"

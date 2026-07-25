@@ -130,12 +130,15 @@ class Toast(QWidget):
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.dismiss)
 
-    def _panel_style(self) -> str:
+    def _panel_style(self, tone: QColor | None = None) -> str:
+        # The accent states what kind of message this is. A "camera reconnected" notice
+        # framed in fault red would read as an alarm about the thing that just resolved.
+        accent = (tone or theme.FAULT).name()
         return f"""
         QWidget#ToastPanel {{
             background: {theme.PANEL.name()};
-            border: 1px solid {theme.FAULT.name()};
-            border-left: 3px solid {theme.FAULT.name()};
+            border: 1px solid {accent};
+            border-left: 3px solid {accent};
             border-radius: {theme.RADIUS['md']}px;
         }}
         QLabel#ToastTitle {{
@@ -165,7 +168,8 @@ class Toast(QWidget):
         self.snoozed.emit()
         self.dismiss()
 
-    def present(self, title: str, cue: str) -> None:
+    def present(self, title: str, cue: str, tone: QColor | None = None) -> None:
+        self._panel.setStyleSheet(self._panel_style(tone))
         self._title.setText(title)
         self._cue.setText(cue)
         self.adjustSize()

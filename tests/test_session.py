@@ -122,6 +122,59 @@ class TestRetention:
         assert removed == 10
         assert store.today(TODAY).tracked_seconds == 10
 
+    def test_purge_older_than_computes_the_cutoff_from_a_window(self, store):
+        fill(store, TODAY - timedelta(days=200), 10, 5, "in_tolerance")
+        fill(store, TODAY, 10, 5, "in_tolerance")
+        removed = store.purge_older_than(180, today=TODAY)
+        assert removed == 5
+        assert store.today(TODAY).tracked_seconds == 5
+
+    def test_zero_retention_keeps_everything(self, store):
+        """Off must never silently mean maximum — the same convention as
+        pause_after_idle_minutes elsewhere in the app."""
+        fill(store, TODAY - timedelta(days=900), 10, 5, "in_tolerance")
+        removed = store.purge_older_than(0, today=TODAY)
+        assert removed == 0
+
+    def test_negative_retention_also_keeps_everything(self, store):
+        fill(store, TODAY - timedelta(days=900), 10, 5, "in_tolerance")
+        assert store.purge_older_than(-5, today=TODAY) == 0
+
+
+class TestSchemaVersioning:
+    def test_a_fresh_database_is_stamped_with_the_current_version(self, store):
+        from postureguard.session import SCHEMA_VERSION
+
+        version = store._db.execute("PRAGMA user_version").fetchone()[0]
+        assert version == SCHEMA_VERSION
+
+    def test_a_pre_versioning_database_is_upgraded_in_place(self, tmp_path):
+        """A database that predates this feature reads back as user_version 0 —
+        SQLite's own default — and must not be mistaken for a broken one."""
+        import sqlite3
+
+        from postureguard.session import SCHEMA, SCHEMA_VERSION
+
+        path = tmp_path / "legacy.db"
+        raw = sqlite3.connect(str(path))
+        raw.executescript(SCHEMA)  # the table exists, but user_version was never set
+        raw.commit()
+        raw.close()
+
+        with SessionStore(path) as store:
+            version = store._db.execute("PRAGMA user_version").fetchone()[0]
+            assert version == SCHEMA_VERSION
+            # Existing data must survive the upgrade untouched.
+            store.log("in_tolerance", when=at(TODAY, 10, 0))
+            assert store.today(TODAY).tracked_seconds == 1
+
+    def test_reopening_an_up_to_date_database_is_a_no_op(self, tmp_path):
+        path = tmp_path / "sessions.db"
+        with SessionStore(path) as store:
+            store.log("in_tolerance", when=at(TODAY, 10, 0))
+        with SessionStore(path) as reopened:
+            assert reopened.today(TODAY).tracked_seconds == 1
+
 
 class TestPrivacy:
     def test_the_schema_stores_no_image_derived_data(self, store):

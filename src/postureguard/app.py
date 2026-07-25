@@ -6,11 +6,13 @@ import argparse
 import logging
 import sys
 
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import paths
+from . import paths, theme
 from .alerts import DimOverlay, Toast, app_icon
+from .capture import available_cameras
 from .config import Config
 from .session import SessionStore
 from .overlay import PostureOverlay, ViewModel
@@ -23,6 +25,11 @@ from .ui.screens.settings import SettingsScreen
 from .ui.window import MainWindow
 
 log = logging.getLogger(__name__)
+
+#: Retention is measured in months, not minutes — checking once a day is more than
+#: enough, and an app that is tray-resident for weeks at a time still needs *some*
+#: periodic check beyond the one at startup.
+RETENTION_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 
 class Application:
@@ -38,12 +45,17 @@ class Application:
         self.window = MainWindow()
         self.toast = Toast()
         self.dim = DimOverlay(config.dim_max_opacity)
-        self.mini = PostureOverlay(config.thresholds(), collapsed=config.mini_collapsed)
+        self.mini = PostureOverlay(
+            collapsed=config.mini_collapsed, always_on_top=config.mini_always_on_top
+        )
 
         self.live = LiveScreen(config.thresholds(), self.store)
         self.history = HistoryScreen(self.store)
         self.exercises = ExercisesScreen(self.store)
-        self.settings = SettingsScreen(config)
+        # Real devices, by name. The picker used to offer a fixed "Camera 0/1/2" whether
+        # or not those existed, so selecting one could tear down a working camera to
+        # open nothing.
+        self.settings = SettingsScreen(config, available_cameras())
 
         self.window.add_screen("live", self.live)
         self.window.add_screen("history", self.history)
@@ -53,6 +65,26 @@ class Application:
 
         self.tray = self._build_tray()
         self._connect()
+
+        if self.settings.camera_was_corrected:
+            # The saved camera does not exist on this machine. The picker already
+            # fell back to showing a real device; this makes that correction actually
+            # take effect — saving it and retrying the camera open — rather than
+            # leaving Settings displaying a working camera while the broken index
+            # underneath it stays saved to disk until something else happens to
+            # touch the control. Runs before controller.start() is ever called (that
+            # happens later, from main()), so the very first camera open attempt
+            # uses the corrected index.
+            self.settings._emit()
+
+        self._retention_timer = QTimer()
+        self._retention_timer.setInterval(RETENTION_CHECK_INTERVAL_MS)
+        self._retention_timer.timeout.connect(self._purge_old_history)
+        self._retention_timer.start()
+        # QTimer.start() fires only after the first interval elapses; an install that
+        # has been running since before this feature existed should not have to wait
+        # a full day to actually get pruned.
+        self._purge_old_history()
 
     # --- wiring -------------------------------------------------------------------
 
@@ -72,6 +104,13 @@ class Application:
         self.controller.break_due.connect(self._on_break_due)
         self.controller.failed.connect(self._on_failure)
         self.controller.baseline_captured.connect(self.settings.refresh)
+        self.controller.camera_health_changed.connect(self._on_camera_health)
+        self.controller.paused_changed.connect(self._on_paused_changed)
+
+        # The frame rate only needs to be smooth for a window actually being watched;
+        # the mini window's correction is legible at a far slower rate.
+        self.window.shown.connect(lambda: self.controller.set_window_visible(True))
+        self.window.hidden.connect(lambda: self.controller.set_window_visible(False))
 
         self.live.snooze_requested.connect(self.controller.snooze)
         self.live.recalibrate_requested.connect(self.controller.recalibrate)
@@ -148,19 +187,35 @@ class Application:
         config.mini_x, config.mini_y = self.config.mini_x, self.config.mini_y
 
         was_shown = self.config.mini_window
+        retention_changed = config.retention_days != self.config.retention_days
         self.config = config
         config.save(paths.config_path())
         self.controller.apply_config(config)
         self.dim.max_opacity = config.dim_max_opacity
         self.live.video.thresholds = config.thresholds()
-        self.mini.thresholds = config.thresholds()
+        self.mini.set_always_on_top(config.mini_always_on_top)
 
         if config.mini_window != was_shown:
             self.set_mini_visible(config.mini_window)
+        if retention_changed:
+            # Shortening the window should take effect now, not tomorrow.
+            self._purge_old_history()
 
     def _on_recalibrate_from_settings(self) -> None:
         self.controller.recalibrate()
         self.window.show_screen("live")
+
+    def _purge_old_history(self) -> None:
+        removed = self.store.purge_older_than(self.config.retention_days)
+        if removed:
+            log.info(
+                "Purged %d history row(s) older than %d days",
+                removed, self.config.retention_days,
+            )
+            # The History screen aggregates from the database directly; if it is the
+            # visible screen right now, a purge behind its back should not leave it
+            # showing rows that no longer exist.
+            self.history.refresh()
 
     # --- mini window ---------------------------------------------------------------
 
@@ -169,12 +224,8 @@ class Application:
             return
         self.mini.show_model(
             ViewModel(
-                frame=state.frame,
-                landmarks=state.reading.landmarks,
                 metrics=state.reading.metrics,
                 faults=state.reading.faults,
-                baseline=state.reading.baseline,
-                aspect=state.aspect,
                 status=state.reading.status,
                 message=state.reading.message,
                 urgency=int(state.intervention.level),
@@ -223,6 +274,37 @@ class Application:
     def toggle_mini(self) -> None:
         self.set_mini_visible(not self.mini.isVisible())
 
+    def _on_paused_changed(self, paused: bool) -> None:
+        """Reflect an idle/lock pause in the tray tooltip only.
+
+        No toast: pausing on lock or idle is routine, expected behaviour that will
+        happen many times a day. A toast every time would be exactly the kind of
+        thing that gets a tool like this disabled by Wednesday. The sidebar, mini
+        window and Live screen already say "Paused" for anyone who looks.
+        """
+        self.tray.setToolTip("PostureGuard — paused" if paused else "PostureGuard")
+
+    def _on_camera_health(self, healthy: bool) -> None:
+        """Tell the user when monitoring actually stops, and when it resumes.
+
+        The window and mini window both show the state, but neither may be visible —
+        the app is designed to run from the tray. Silently watching nothing is the one
+        failure this tool cannot afford to keep to itself.
+        """
+        if healthy:
+            self.tray.setToolTip("PostureGuard")
+            self.toast.present(
+                "Camera reconnected", "Monitoring has resumed.", theme.IN_TOLERANCE
+            )
+            return
+        self.tray.setToolTip("PostureGuard — camera disconnected")
+        self.toast.present(
+            "Camera disconnected",
+            "Nothing is being monitored. Reconnect the camera, or choose another "
+            "in Settings.",
+            theme.WARNING,
+        )
+
     def _on_window_closed(self) -> None:
         # Say so once. Silently continuing to watch someone through their webcam after
         # they closed the window is not a surprise worth saving them from.
@@ -238,16 +320,24 @@ class Application:
     def _on_failure(self, message: str) -> None:
         QMessageBox.critical(self.window, "PostureGuard", message)
 
-    def start(self) -> bool:
-        if not self.controller.start():
-            return False
-        if self.config.mini_window:
+    def start(self) -> None:
+        # A camera that fails to open — wrong saved index, unplugged, in use
+        # elsewhere — must not prevent the window from appearing. It used to: the
+        # whole app would show one error dialog and exit(1), and because the broken
+        # camera_index was already persisted, every subsequent launch repeated the
+        # exact same failure with no way to reach Settings and fix it. The error is
+        # still reported (controller.start() emits `failed`, shown as a dialog by
+        # _on_failure), but the window comes up regardless so the only way out of a
+        # bad camera selection is never "delete config.json by hand".
+        running = self.controller.start()
+        if self.config.mini_window and running:
             self._place_mini()
             self.mini.show()
-        self.live.set_mini_shown(self.config.mini_window)
-        if not self.config.start_minimized:
+        self.live.set_mini_shown(self.config.mini_window and running)
+        # Force the window into view on failure even if start_minimized is set —
+        # minimized *and* broken would be invisible and unrecoverable from the tray.
+        if not self.config.start_minimized or not running:
             self.window.show()
-        return True
 
     def quit(self) -> None:
         """Genuinely exit. Closing the window only hides it — the tray keeps running."""
@@ -259,6 +349,7 @@ class Application:
         if self._shut_down:
             return
         self._shut_down = True
+        self._retention_timer.stop()
         self.controller.stop()
         self.dim.hide()
         self.toast.hide()
@@ -289,6 +380,13 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
+    # Must be set before QApplication exists. PassThrough keeps the exact fractional
+    # scale factor (1.5 on this project's own dev display) rather than Qt's default
+    # of rounding it to the nearest whole number first — the default is what most
+    # visibly breaks pixel-grid alignment (see ui/widgets.crisp) on a 125%/150% screen.
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
     qt = QApplication(sys.argv[:1])
     qt.setApplicationName("PostureGuard")
     qt.setWindowIcon(app_icon())
@@ -303,8 +401,10 @@ def main(argv: list[str] | None = None) -> int:
         paths.baseline_path().unlink(missing_ok=True)
 
     application = Application(config)
-    if not application.start():
-        return 1
+    # start() always brings the window up, even if the camera failed to open — see
+    # its docstring-equivalent comment. There is no longer a startup condition where
+    # exiting before qt.exec() is the right call.
+    application.start()
 
     qt.aboutToQuit.connect(application.shutdown)
     return qt.exec()

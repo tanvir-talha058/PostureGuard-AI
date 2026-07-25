@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QPainter, QPen
+from PySide6.QtGui import QCloseEvent, QPainter
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
     QHBoxLayout,
-    QLabel,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -16,7 +15,6 @@ from PySide6.QtWidgets import (
 )
 
 from .. import theme
-from ..escalation import Level
 from .controller import LiveState
 from .widgets import label
 
@@ -113,6 +111,12 @@ class MainWindow(QWidget):
     """Shell. Screens are injected so this file never grows a dependency on any one."""
 
     closing = Signal()
+    #: Fired whenever the window becomes visible or hidden, including the hide that
+    #: follows an accepted close event (closing this window minimizes to tray rather
+    #: than quitting, so "closed" and "hidden" are the same event here). The controller
+    #: uses this to decide whether the full frame rate is actually being watched.
+    shown = Signal()
+    hidden = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -156,6 +160,10 @@ class MainWindow(QWidget):
         self.sidebar.status_text.setText(self._status_text(state))
 
     def _status_text(self, state: LiveState) -> str:
+        if state.paused:
+            return "Paused"
+        if not state.camera_healthy:
+            return "Camera lost"
         if state.calibrating:
             return "Calibrating"
         fault = state.intervention.fault
@@ -172,3 +180,11 @@ class MainWindow(QWidget):
     def closeEvent(self, event: QCloseEvent) -> None:
         self.closing.emit()
         super().closeEvent(event)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.shown.emit()
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        self.hidden.emit()

@@ -32,9 +32,6 @@ from postureguard.ui.screens.live import LiveScreen  # noqa: E402
 from postureguard.ui.screens.settings import SettingsScreen  # noqa: E402
 from postureguard.ui.window import MainWindow  # noqa: E402
 
-sys.path.insert(0, str(ROOT / "tools"))
-from preview_overlay import scene  # noqa: E402
-
 FAULTS = {
     FaultKind.FORWARD_HEAD: Fault(FaultKind.FORWARD_HEAD, 2.2, "Pull your chin back.", ()),
     FaultKind.SPINE_FLEXION: Fault(FaultKind.SPINE_FLEXION, 1.6, "Sit tall.", ()),

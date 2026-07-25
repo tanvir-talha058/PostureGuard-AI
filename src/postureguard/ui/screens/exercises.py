@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from ... import theme
-from ...rules import FAULT_TITLES, FaultKind
+from ...rules import FAULT_TITLES
 from ...session import SessionStore
 from ...stretches import ALL_EXERCISES, Exercise, Routine, routine_for
 from ..widgets import Card, PageHeader, button, eyebrow, label, plain

@@ -46,9 +46,29 @@ class Config:
     mini_window: bool = True
     #: Collapsed to a single instruction bar, with no camera view or readings.
     mini_collapsed: bool = False
+    #: Keeps the mini window above every other window, including maximized ones. On
+    #: by default: a correction that can be buried behind whatever else is open stops
+    #: correcting anything within minutes of daily use.
+    mini_always_on_top: bool = True
     #: Last position on screen. -1 means "not placed yet, put it bottom-right".
     mini_x: int = -1
     mini_y: int = -1
+
+    # --- data ---
+    #: How long session history is kept before it is purged automatically. 0 keeps
+    #: it forever. Default chosen to bound growth (roughly 1.3 GB/year at 6h/day of
+    #: use) while comfortably covering the History screen's longest range (30 days).
+    retention_days: int = 180
+
+    # --- power ---
+    #: Release the camera while the Windows session is locked — nobody could
+    #: plausibly be in frame, and a released device also turns its capture LED off.
+    pause_when_locked: bool = True
+    #: Release the camera after this many minutes with no keyboard/mouse input.
+    #: 0 disables idle-based pausing.
+    pause_after_idle_minutes: int = 10
+    #: Halve the frame-capture rate while running on battery.
+    battery_saver: bool = True
 
     # --- app ---
     start_minimized: bool = False

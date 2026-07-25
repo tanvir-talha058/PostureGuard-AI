@@ -63,6 +63,39 @@ class TestPersistence:
         assert loaded.mini_window is False
         assert (loaded.mini_x, loaded.mini_y) == (1200, 40)
 
+    def test_mini_always_on_top_round_trips_and_defaults_on(self, tmp_path):
+        assert Config().mini_always_on_top is True
+        path = tmp_path / "config.json"
+        Config(mini_always_on_top=False).save(path)
+        assert Config.load(path).mini_always_on_top is False
+
+    def test_retention_setting_round_trips(self, tmp_path):
+        path = tmp_path / "config.json"
+        Config(retention_days=30).save(path)
+        assert Config.load(path).retention_days == 30
+
+    def test_retention_defaults_to_a_bounded_window_not_forever(self):
+        """The whole point is that unbounded growth was the bug being fixed."""
+        assert Config().retention_days > 0
+
+    def test_power_settings_round_trip(self, tmp_path):
+        path = tmp_path / "config.json"
+        Config(
+            pause_when_locked=False, pause_after_idle_minutes=0, battery_saver=False
+        ).save(path)
+        loaded = Config.load(path)
+        assert loaded.pause_when_locked is False
+        assert loaded.pause_after_idle_minutes == 0
+        assert loaded.battery_saver is False
+
+    def test_power_defaults_favour_pausing(self):
+        """Defaults should err toward saving power, not toward surprising the user
+        by staying dark on the assumption they will find and enable it."""
+        config = Config()
+        assert config.pause_when_locked is True
+        assert config.pause_after_idle_minutes > 0
+        assert config.battery_saver is True
+
     def test_mini_window_is_on_by_default_and_unplaced(self):
         assert Config().mini_window is True
         assert Config().mini_x == -1 and Config().mini_y == -1

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 
 from .calibration import Baseline, BaselineBuilder, DriftTracker
 from .landmarks import Landmarks

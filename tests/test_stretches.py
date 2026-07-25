@@ -92,3 +92,113 @@ class TestBreakTimer:
         for t in range(0, 200):
             timer.update(present=True, now=t)
         assert not timer.due
+
+
+class TestBreakTimerPersistence:
+    def test_a_recent_save_restores_the_banked_time(self):
+        timer = BreakTimer(interval_minutes=10)
+        for t in range(0, 121):  # 120s worked, ticked like the real controller does
+            timer.update(present=True, now=t)
+        assert timer._worked == pytest.approx(120.0)
+
+        state = timer.to_state()
+        restored = BreakTimer.restore(
+            state, interval_minutes=10, enabled=True, now_wall=state["saved_at"] + 5
+        )
+        for t in range(0, 11):  # +10s worked, one second at a time
+            restored.update(present=True, now=t)
+        assert restored.seconds_until_due == pytest.approx(600 - 130, abs=0.5)
+
+    def test_a_stale_save_is_discarded(self):
+        """The user has clearly been away; the pre-gap progress should not just
+        resume counting as if nothing happened."""
+        from postureguard.stretches import BREAK_STATE_STALE_AFTER_SECONDS
+
+        timer = BreakTimer(interval_minutes=10)
+        for t in range(0, 301):
+            timer.update(present=True, now=t)
+
+        state = timer.to_state()
+        restored = BreakTimer.restore(
+            state,
+            interval_minutes=10,
+            enabled=True,
+            now_wall=state["saved_at"] + BREAK_STATE_STALE_AFTER_SECONDS + 1,
+        )
+        assert restored.seconds_until_due == pytest.approx(600.0)
+
+    def test_a_save_from_the_future_is_also_discarded(self):
+        """A clock that moved backwards (DST, manual change) must not be trusted
+        into crediting time that has not happened yet."""
+        timer = BreakTimer(interval_minutes=10)
+        for t in range(0, 121):
+            timer.update(present=True, now=t)
+
+        state = timer.to_state()
+        restored = BreakTimer.restore(
+            state, interval_minutes=10, enabled=True, now_wall=state["saved_at"] - 10
+        )
+        assert restored.seconds_until_due == pytest.approx(600.0)
+
+    def test_restoring_does_not_immediately_fire_due_before_a_real_tick(self):
+        """A restore that lands already over the interval must wait for the next
+        genuine update() before announcing it, the same as a fresh timer would."""
+        timer = BreakTimer(interval_minutes=1)
+        for t in range(0, 65):  # ticks past the 60s interval, one second at a time
+            timer.update(present=True, now=t)
+        assert timer._worked > timer.interval_seconds
+        state = timer.to_state()
+
+        # restore() only carries `worked_seconds` across, never `_due` — so the
+        # restored timer starts as if it has not yet noticed it is over interval.
+        restored = BreakTimer.restore(
+            state, interval_minutes=1, enabled=True, now_wall=state["saved_at"]
+        )
+        assert restored.update(present=True, now=0) is False  # baseline tick only
+        assert restored.update(present=True, now=1) is True  # now it announces
+
+    def test_restoring_ignores_a_monotonic_clock_from_the_old_process(self):
+        """_last_tick must never be restored — it is only meaningful within the
+        process that produced it."""
+        timer = BreakTimer(interval_minutes=10)
+        timer.update(present=True, now=99999.0)
+        state = timer.to_state()
+
+        restored = BreakTimer.restore(
+            state, interval_minutes=10, enabled=True, now_wall=state["saved_at"]
+        )
+        # A fresh process's monotonic clock starts near zero; if the old _last_tick
+        # had survived, this update would compute an enormous negative delta.
+        assert restored.update(present=True, now=1.0) is False
+        assert restored.seconds_until_due <= 600.0
+
+    def test_round_trips_through_disk(self, tmp_path):
+        path = tmp_path / "break_state.json"
+        timer = BreakTimer(interval_minutes=10)
+        for t in range(0, 121):
+            timer.update(present=True, now=t)
+        timer.save_state(path)
+
+        restored = BreakTimer.load_restored(path, interval_minutes=10, enabled=True)
+        restored.update(present=True, now=0)
+        restored.update(present=True, now=1)
+        assert restored.seconds_until_due < 600.0
+
+    def test_a_missing_file_yields_a_fresh_timer(self, tmp_path):
+        restored = BreakTimer.load_restored(
+            tmp_path / "absent.json", interval_minutes=10, enabled=True
+        )
+        assert restored.seconds_until_due == pytest.approx(600.0)
+
+    def test_a_corrupt_file_yields_a_fresh_timer_rather_than_crashing(self, tmp_path):
+        path = tmp_path / "break_state.json"
+        path.write_text("{ not json", encoding="utf-8")
+        restored = BreakTimer.load_restored(path, interval_minutes=10, enabled=True)
+        assert restored.seconds_until_due == pytest.approx(600.0)
+
+    def test_malformed_state_shapes_yield_a_fresh_timer(self, tmp_path):
+        for payload in ('"just a string"', "[1, 2, 3]", '{"worked_seconds": "oops"}'):
+            path = tmp_path / "break_state.json"
+            path.write_text(payload, encoding="utf-8")
+            restored = BreakTimer.load_restored(path, interval_minutes=10, enabled=True)
+            assert restored.seconds_until_due == pytest.approx(600.0)

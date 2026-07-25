@@ -15,6 +15,7 @@ models/*.task
 *.db
 baseline.json
 config.json
+break_state.json
 
 .vscode/
 .idea/

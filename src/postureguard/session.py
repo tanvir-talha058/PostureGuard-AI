@@ -18,7 +18,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from .rules import Fault, FaultKind
 
@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS samples (
 CREATE INDEX IF NOT EXISTS idx_samples_day ON samples(day);
 CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples(ts);
 """
+
+#: Bumped whenever SCHEMA changes. Stamped into the database itself via
+#: `PRAGMA user_version`, so a future column or index change has somewhere to land —
+#: `_migrate` can branch on the version it finds and step forward — instead of every
+#: existing install breaking the moment the schema moves.
+SCHEMA_VERSION = 1
 
 #: Statuses that count as the user actually being at the desk and measurable. Time
 #: spent away must not dilute the score — a lunch break is not good posture.
@@ -78,9 +84,24 @@ class SessionStore:
         # same thread, but check_same_thread stays off so a future worker cannot
         # deadlock on it silently.
         self._db = sqlite3.connect(str(path), check_same_thread=False)
-        self._db.executescript(SCHEMA)
-        self._db.commit()
+        self._migrate()
         self._last_logged = 0.0
+
+    def _migrate(self) -> None:
+        """Bring the database up to SCHEMA_VERSION.
+
+        `CREATE ... IF NOT EXISTS` makes running SCHEMA idempotent, so this is safe to
+        call against a brand-new file, a database from before versioning existed
+        (reads back as version 0, SQLite's default), or one already current — all
+        three converge on the same state. A real future migration adds a branch keyed
+        on the version found, each one stepping `user_version` forward by exactly one
+        so a database can hop through several releases in sequence.
+        """
+        self._db.executescript(SCHEMA)
+        version = self._db.execute("PRAGMA user_version").fetchone()[0]
+        if version < SCHEMA_VERSION:
+            self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        self._db.commit()
 
     # --- writing ------------------------------------------------------------------
 
@@ -200,6 +221,19 @@ class SessionStore:
         cursor = self._db.execute("DELETE FROM samples WHERE day < ?", (cutoff.isoformat(),))
         self._db.commit()
         return cursor.rowcount
+
+    def purge_older_than(self, days: int, today: date | None = None) -> int:
+        """Delete rows more than `days` days old. `days <= 0` keeps everything.
+
+        The convenience most callers actually want: a retention *window*, not a
+        calendar cutoff. Zero-or-negative disabling rather than deleting everything
+        matches the same convention `pause_after_idle_minutes` uses elsewhere in
+        the app — a setting reading as "off" should never read as "maximum".
+        """
+        if days <= 0:
+            return 0
+        cutoff = (today or date.today()) - timedelta(days=days)
+        return self.purge_before(cutoff)
 
     def close(self) -> None:
         self._db.close()

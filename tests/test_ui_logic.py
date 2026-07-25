@@ -156,6 +156,215 @@ class TestSettingsRoundTrip:
         assert captured == []
 
 
+class TestPowerSettings:
+    def test_controls_reflect_the_starting_config(self, qt_app):
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings import SettingsScreen
+
+        screen = SettingsScreen(
+            Config(pause_when_locked=False, pause_after_idle_minutes=5, battery_saver=False)
+        )
+        assert screen.pause_when_locked.isChecked() is False
+        assert screen.pause_after_idle.slider.value() == 5
+        assert screen.battery_saver.isChecked() is False
+
+    def test_toggling_a_power_control_emits_the_new_value(self, qt_app):
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings import SettingsScreen
+
+        screen = SettingsScreen(Config(pause_when_locked=True))
+        captured = []
+        screen.changed.connect(captured.append)
+
+        screen.pause_when_locked.setChecked(False)
+
+        assert captured[-1].pause_when_locked is False
+
+    def test_the_idle_slider_reaching_zero_reads_as_never(self, qt_app):
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings import SettingsScreen
+
+        screen = SettingsScreen(Config())
+        screen.pause_after_idle.slider.setValue(0)
+        assert screen.pause_after_idle._readout.text() == "Never"
+
+
+class TestCameraPicker:
+    def _screen(self, cameras, **config_kwargs):
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings import SettingsScreen
+
+        return SettingsScreen(Config(**config_kwargs), cameras)
+
+    def test_lists_only_the_cameras_that_exist(self, qt_app):
+        """It used to offer a fixed Camera 0/1/2 regardless of what was attached."""
+        from postureguard.capture import CameraInfo
+
+        screen = self._screen([CameraInfo(0, "HP HD Camera")])
+        assert screen.camera.count() == 1
+        assert screen.camera.itemText(0) == "HP HD Camera"
+
+    def test_selecting_sends_the_device_index_not_the_list_position(self, qt_app):
+        """With a gap in the indices these differ, and picking the wrong one opens
+        the wrong camera."""
+        from postureguard.capture import CameraInfo
+
+        screen = self._screen(
+            [CameraInfo(0, "Built-in"), CameraInfo(3, "External")], camera_index=0
+        )
+        captured = []
+        screen.changed.connect(captured.append)
+        screen.camera.setCurrentIndex(1)  # list position 1, device index 3
+
+        assert captured[-1].camera_index == 3
+
+    def test_restores_the_stored_device_even_when_indices_are_sparse(self, qt_app):
+        from postureguard.capture import CameraInfo
+
+        screen = self._screen(
+            [CameraInfo(0, "Built-in"), CameraInfo(3, "External")], camera_index=3
+        )
+        assert screen.camera.currentData() == 3
+        assert screen.camera.currentText() == "External"
+
+    def test_a_stored_camera_that_has_gone_away_falls_back(self, qt_app):
+        """Unplugging the selected webcam must not leave an empty selection."""
+        from postureguard.capture import CameraInfo
+
+        screen = self._screen([CameraInfo(0, "Built-in")], camera_index=7)
+        assert screen.camera.currentData() == 0
+
+    def test_no_cameras_says_so_and_disables_the_control(self, qt_app):
+        screen = self._screen([])
+        assert not screen.camera.isEnabled()
+        assert "No camera" in screen.camera.currentText()
+
+    def test_flags_when_it_had_to_substitute_a_camera(self, qt_app):
+        """Application uses this flag to correct and re-persist the setting
+        automatically — see test_app_camera_self_heal.py for the end-to-end case
+        this exists to fix: a stale saved index silently showing a working camera
+        on screen while staying broken underneath."""
+        from postureguard.capture import CameraInfo
+
+        screen = self._screen([CameraInfo(0, "Built-in")], camera_index=7)
+        assert screen.camera_was_corrected is True
+
+    def test_does_not_flag_a_correct_stored_selection(self, qt_app):
+        from postureguard.capture import CameraInfo
+
+        screen = self._screen([CameraInfo(0, "Built-in")], camera_index=0)
+        assert screen.camera_was_corrected is False
+
+    def test_does_not_flag_when_there_is_nothing_to_substitute(self, qt_app):
+        """No cameras at all is a different, unfixable situation — there is no
+        correction to apply, so this must not be confused with one."""
+        screen = self._screen([], camera_index=7)
+        assert screen.camera_was_corrected is False
+
+
+class TestMiniWindowHasNoCamera:
+    """The mini window shows the posture status and the fix, never the camera feed —
+    the main window is where you go to look at yourself, this is what is in front of
+    you the rest of the time."""
+
+    def test_view_model_carries_no_frame_or_landmarks(self, qt_app):
+        """A regression here would mean the panel started depending on camera data
+        again — the whole point is that it never needs a frame to draw itself."""
+        from postureguard.overlay import ViewModel
+
+        fields = {f.name for f in __import__("dataclasses").fields(ViewModel)}
+        assert "frame" not in fields
+        assert "landmarks" not in fields
+        assert "baseline" not in fields
+
+    def test_the_expanded_panel_is_shorter_without_a_video_section(self, qt_app):
+        from postureguard import theme
+        from postureguard.overlay import (
+            COLLAPSED_HEIGHT, FAULT_HEIGHT, HEADER_HEIGHT, READINGS_HEIGHT, PostureOverlay,
+        )
+
+        overlay = PostureOverlay()
+        assert overlay.height() == HEADER_HEIGHT + FAULT_HEIGHT + READINGS_HEIGHT
+        # Sanity check the shape of the claim, not just its arithmetic: it must be
+        # meaningfully smaller than it would be with a camera section, and still
+        # bigger than the collapsed bar.
+        assert overlay.height() < HEADER_HEIGHT + theme.VIDEO_HEIGHT + FAULT_HEIGHT + READINGS_HEIGHT
+        assert overlay.height() > COLLAPSED_HEIGHT
+
+    def test_a_fault_shows_the_correction_with_no_frame_supplied(self, qt_app):
+        """The panel must not require a camera frame to say what to do — it never
+        had one to begin with now."""
+        from postureguard.overlay import PostureOverlay, ViewModel
+        from postureguard.rules import Fault, FaultKind
+
+        overlay = PostureOverlay()
+        fault = Fault(FaultKind.FORWARD_HEAD, 2.0, "Pull your chin back.", ())
+        overlay.show_model(ViewModel(faults=[fault], status="fault"))
+        assert overlay.model.primary_fault is fault  # renders without a frame present
+
+    def test_searching_prefers_the_engines_own_instruction(self, qt_app):
+        """'Step into view' is an instruction; the generic label is a fallback for
+        when the engine has not supplied one."""
+        from postureguard.overlay import PostureOverlay, ViewModel
+
+        overlay = PostureOverlay()
+        overlay.show_model(ViewModel(status="searching", message="Step into view"))
+        assert overlay._resting_text() == "Step into view"
+
+    def test_searching_without_a_message_falls_back_to_a_label(self, qt_app):
+        from postureguard.overlay import PostureOverlay, ViewModel
+
+        overlay = PostureOverlay()
+        overlay.show_model(ViewModel(status="searching"))
+        assert overlay._resting_text() == "No subject"
+
+
+class TestMiniWindowAlwaysOnTop:
+    def test_defaults_on(self, qt_app):
+        from postureguard.overlay import PostureOverlay
+
+        assert PostureOverlay().always_on_top is True
+
+    def test_flag_reflects_the_constructor_argument(self, qt_app):
+        from PySide6.QtCore import Qt
+
+        from postureguard.overlay import PostureOverlay
+
+        on = PostureOverlay(always_on_top=True)
+        off = PostureOverlay(always_on_top=False)
+        assert bool(on.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+        assert not bool(off.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+
+    def test_set_always_on_top_updates_the_flag_live(self, qt_app):
+        from PySide6.QtCore import Qt
+
+        from postureguard.overlay import PostureOverlay
+
+        overlay = PostureOverlay(always_on_top=True)
+        overlay.set_always_on_top(False)
+        assert overlay.always_on_top is False
+        assert not bool(overlay.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+
+    def test_toggling_it_does_not_leave_a_visible_window_hidden(self, qt_app):
+        """Qt hides a native window when its flags change; this must restore
+        visibility, or the setting silently makes the panel disappear."""
+        from postureguard.overlay import PostureOverlay
+
+        overlay = PostureOverlay()
+        overlay.show()
+        assert overlay.isVisible()
+        overlay.set_always_on_top(False)
+        assert overlay.isVisible()
+
+    def test_setting_the_same_value_is_a_no_op(self, qt_app):
+        from postureguard.overlay import PostureOverlay
+
+        overlay = PostureOverlay(always_on_top=True)
+        flags_before = overlay.windowFlags()
+        overlay.set_always_on_top(True)
+        assert overlay.windowFlags() == flags_before
+
+
 class TestMiniWindow:
     def test_drift_is_never_the_instruction(self, qt_app):
         """Drift describes ten minutes of history and has no immediate action."""
@@ -243,18 +452,6 @@ class TestMiniWindow:
             verb = FAULT_ACTIONS[kind].split()[0].lower().strip("—")
             assert verb in _CUES[kind].lower()
 
-    def test_faulty_joints_are_collected_from_every_active_fault(self, qt_app):
-        from postureguard.overlay import ViewModel
-        from postureguard.rules import Fault, FaultKind
-
-        model = ViewModel(
-            faults=[
-                Fault(FaultKind.FORWARD_HEAD, 1.0, "", ("left_ear",)),
-                Fault(FaultKind.LATERAL_TILT, 1.0, "", ("left_eye",)),
-            ]
-        )
-        assert model.faulty_joints == frozenset({"left_ear", "left_eye"})
-
 
 class TestStatTile:
     def test_recolouring_preserves_the_metric_type_role(self, qt_app):
@@ -269,3 +466,40 @@ class TestStatTile:
         assert not tile._note.isVisible()
         tile.set_value("88", note="over 3 days")
         assert tile._note.text() == "over 3 days"
+
+
+class TestCrispPixelSnapping:
+    """crisp() had no test coverage at all before this, and a prior pass flagged —
+    but never actually fixed — that it silently assumed devicePixelRatio 1.0. This
+    project's own dev display reports 1.5, so the bug was live, not hypothetical."""
+
+    def _lands_on_a_physical_pixel_boundary(self, logical_value: float, dpr: float) -> bool:
+        physical = logical_value * dpr
+        # A 1px stroke centred on a boundary sits at physical N + 0.5 for integer N.
+        return abs((physical - 0.5) - round(physical - 0.5)) < 1e-9
+
+    def test_default_dpr_matches_the_original_flat_half_pixel_behaviour(self):
+        from postureguard.ui.widgets import crisp
+
+        assert crisp(10) == 10.5
+        assert crisp(0) == 0.5
+
+    @pytest.mark.parametrize("dpr", [1.0, 1.25, 1.5, 1.75, 2.0])
+    @pytest.mark.parametrize("value", [0, 1, 7, 10.3, 42])
+    def test_the_result_lands_on_a_physical_pixel_boundary(self, dpr, value):
+        from postureguard.ui.widgets import crisp
+
+        result = crisp(value, dpr)
+        assert self._lands_on_a_physical_pixel_boundary(result, dpr)
+
+    def test_the_naive_flat_offset_would_have_missed_at_this_projects_own_dpr(self):
+        """Proves the bug this fix addresses, not just the fix's own arithmetic:
+        the pre-fix formula fails the same boundary check at dpr=1.5."""
+        naive = round(7) + 0.5
+        assert not self._lands_on_a_physical_pixel_boundary(naive, 1.5)
+
+    def test_dpr_one_is_a_no_op_change_from_the_previous_implementation(self):
+        from postureguard.ui.widgets import crisp
+
+        for value in (0, 1, 7, 10.3, 42, -3.2):
+            assert crisp(value, 1.0) == round(value) + 0.5
