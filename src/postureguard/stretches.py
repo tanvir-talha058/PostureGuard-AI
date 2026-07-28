@@ -121,6 +121,32 @@ STAND_AND_WALK = Exercise(
     ),
 )
 
+NECK_ROTATION = Exercise(
+    name="Neck rotation release",
+    purpose="Undoes the twist of holding your head turned toward a side monitor.",
+    seconds=40,
+    targets=FaultKind.HEAD_ROTATION,
+    steps=(
+        "Sit tall, facing forward.",
+        "Slowly turn your head to look over one shoulder as far as is comfortable.",
+        "Hold 10 seconds, feeling the stretch on the opposite side of the neck.",
+        "Return to centre and repeat to the other side.",
+    ),
+)
+
+SHOULDER_DROP = Exercise(
+    name="Shoulder drop and roll",
+    purpose="Releases the trapezius from holding your shoulders up near your ears.",
+    seconds=40,
+    targets=FaultKind.SHOULDER_SHRUG,
+    steps=(
+        "Sit or stand tall, arms relaxed at your sides.",
+        "Inhale and shrug your shoulders up toward your ears.",
+        "Exhale and let them drop heavily — do not ease them down, drop them.",
+        "Roll them back and down a few times. Repeat 6 times.",
+    ),
+)
+
 HIP_FLEXOR = Exercise(
     name="Standing hip flexor stretch",
     purpose="Releases the hips that shorten from sitting and drag your pelvis out of position.",
@@ -142,6 +168,8 @@ ALL_EXERCISES: tuple[Exercise, ...] = (
     LATERAL_NECK,
     SHOULDER_BLADE_SQUEEZE,
     TWENTY_TWENTY_TWENTY,
+    NECK_ROTATION,
+    SHOULDER_DROP,
     HIP_FLEXOR,
     STAND_AND_WALK,
 )
@@ -168,6 +196,8 @@ _REASONS = {
     FaultKind.SPINE_FLEXION: "You have been sinking and rounding through the upper back.",
     FaultKind.SCREEN_TOO_CLOSE: "You have been creeping toward the screen.",
     FaultKind.LATERAL_TILT: "You have been leaning onto one side.",
+    FaultKind.HEAD_ROTATION: "You have been holding your head turned to one side.",
+    FaultKind.SHOULDER_SHRUG: "Your shoulders have been creeping up toward your ears.",
     FaultKind.DRIFT: "Your posture has been slowly degrading through the session.",
 }
 

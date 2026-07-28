@@ -34,6 +34,8 @@ class FaultKind(str, Enum):
     SPINE_FLEXION = "spine_flexion"
     SCREEN_TOO_CLOSE = "screen_too_close"
     LATERAL_TILT = "lateral_tilt"
+    HEAD_ROTATION = "head_rotation"
+    SHOULDER_SHRUG = "shoulder_shrug"
     DRIFT = "drift"
 
 
@@ -64,6 +66,8 @@ FAULT_TITLES: dict[FaultKind, str] = {
     FaultKind.SPINE_FLEXION: "Slouching",
     FaultKind.SCREEN_TOO_CLOSE: "Too close to the screen",
     FaultKind.LATERAL_TILT: "Leaning to one side",
+    FaultKind.HEAD_ROTATION: "Turned to the side",
+    FaultKind.SHOULDER_SHRUG: "Shoulders raised",
     FaultKind.DRIFT: "Posture drifting",
 }
 
@@ -72,6 +76,8 @@ _CUES: dict[FaultKind, str] = {
     FaultKind.SPINE_FLEXION: "Sit tall — lift your chest and stack your ribs over your hips.",
     FaultKind.SCREEN_TOO_CLOSE: "Push back to about an arm's length from the screen.",
     FaultKind.LATERAL_TILT: "Level out — even your shoulders and bring your head upright.",
+    FaultKind.HEAD_ROTATION: "Square your monitor to your seat rather than holding your neck twisted toward it.",
+    FaultKind.SHOULDER_SHRUG: "Drop your shoulders away from your ears and let your arms hang.",
     FaultKind.DRIFT: "You've been slowly sinking. Reset: feet flat, hips back, chest up.",
 }
 
@@ -83,6 +89,8 @@ FAULT_ACTIONS: dict[FaultKind, str] = {
     FaultKind.SPINE_FLEXION: "Sit tall — chest up",
     FaultKind.SCREEN_TOO_CLOSE: "Push back from the screen",
     FaultKind.LATERAL_TILT: "Level your shoulders",
+    FaultKind.HEAD_ROTATION: "Face your monitor square-on",
+    FaultKind.SHOULDER_SHRUG: "Drop your shoulders",
     FaultKind.DRIFT: "Reset — feet flat, hips back",
 }
 
@@ -91,6 +99,8 @@ _JOINTS: dict[FaultKind, tuple[str, ...]] = {
     FaultKind.SPINE_FLEXION: ("left_shoulder", "right_shoulder", "left_hip", "right_hip"),
     FaultKind.SCREEN_TOO_CLOSE: ("left_eye", "right_eye", "nose"),
     FaultKind.LATERAL_TILT: ("left_shoulder", "right_shoulder", "left_eye", "right_eye"),
+    FaultKind.HEAD_ROTATION: ("nose", "left_eye", "right_eye"),
+    FaultKind.SHOULDER_SHRUG: ("left_shoulder", "right_shoulder", "left_ear", "right_ear"),
     FaultKind.DRIFT: ("left_shoulder", "right_shoulder"),
 }
 
@@ -112,6 +122,9 @@ class Thresholds:
     torso_degrees: float = 12.0
     #: Frame-height units the shoulders may sink before it counts as collapsing.
     sink_units: float = 0.045
+    #: Absolute deviation of `head_yaw` before a sustained turn counts. A heuristic
+    #: threshold, not a calibrated angle — see the metric's own docstring.
+    head_yaw_threshold: float = 0.35
 
     #: Consecutive frames over threshold before a fault is raised.
     enter_frames: int = 15
@@ -125,44 +138,69 @@ class Thresholds:
     drift_scale: float = 0.6
 
 
-class _FaultState:
-    """Debounce and hysteresis for one fault kind."""
+class Debounce:
+    """Enter/exit-frame debounce with a hysteresis band, over a signal expressed as
+    a ratio to threshold (>=1.0 means "over").
+
+    Generalized out of what fault detection needs — "sustained past a threshold for
+    N frames, released only once it falls well below that threshold for M frames" —
+    so anything with the same shape can reuse it instead of hand-rolling its own
+    counters. `_FaultState` below is this plus severity tracking; `engine.Engine`'s
+    sitting/standing switch is this with nothing else.
+    """
 
     def __init__(self) -> None:
         self.active = False
-        self.severity = 0.0
         self._over = 0
         self._under = 0
+
+    def update(self, value: float, enter_frames: int, exit_frames: int, exit_ratio: float) -> bool:
+        if not self.active:
+            if value >= 1.0:
+                self._over += 1
+                self._under = 0
+                if self._over >= enter_frames:
+                    self.active = True
+            else:
+                # Strict reset: a brief lapse must never accumulate into an alert.
+                self._over = 0
+            return self.active
+
+        if value < exit_ratio:
+            self._under += 1
+            if self._under >= exit_frames:
+                self.active = False
+                self._over = 0
+                self._under = 0
+        else:
+            self._under = 0
+        return self.active
+
+
+class _FaultState:
+    """Debounce and hysteresis for one fault kind, plus its severity."""
+
+    def __init__(self) -> None:
+        self._debounce = Debounce()
+        self.severity = 0.0
+
+    @property
+    def active(self) -> bool:
+        return self._debounce.active
 
     def update(self, excess: float | None, thresholds: Thresholds) -> bool:
         # No measurement is not evidence of good posture, but it is not evidence of
         # bad posture either — treat it as clean so faults release when the user
         # leaves rather than latching on forever.
         value = 0.0 if excess is None else excess
-
-        if not self.active:
-            if value >= 1.0:
-                self._over += 1
-                self._under = 0
-                if self._over >= thresholds.enter_frames:
-                    self.active = True
-                    self.severity = value
-            else:
-                # Strict reset: a brief lapse must never accumulate into an alert.
-                self._over = 0
-            return self.active
-
-        self.severity = max(value, 1.0)
-        if value < thresholds.exit_ratio:
-            self._under += 1
-            if self._under >= thresholds.exit_frames:
-                self.active = False
-                self.severity = 0.0
-                self._over = 0
-                self._under = 0
-        else:
-            self._under = 0
-        return self.active
+        active = self._debounce.update(
+            value, thresholds.enter_frames, thresholds.exit_frames, thresholds.exit_ratio
+        )
+        # Whatever value crossed the enter threshold this frame is itself >= 1.0
+        # (entry requires it), so this covers both "just entered" and "still active"
+        # with one expression, and drops back to 0 the instant it is not active.
+        self.severity = max(value, 1.0) if active else 0.0
+        return active
 
 
 def _deviation_excess(
@@ -244,11 +282,42 @@ def _lateral_tilt(metrics: PostureMetrics, base: Baseline, t: Thresholds) -> flo
     return max(candidates) if candidates else None
 
 
+def _head_rotation(metrics: PostureMetrics, base: Baseline, t: Thresholds) -> float | None:
+    """A sustained turn toward a side monitor, not a momentary glance."""
+    return _deviation_excess(metrics.head_yaw, base.get("head_yaw"), t.head_yaw_threshold)
+
+
+def _shoulder_shrug(metrics: PostureMetrics, base: Baseline, t: Thresholds) -> float | None:
+    """The shoulders rising toward the ears — the same vertical closing forward head
+    uses, but *without* the head also moving toward the camera.
+
+    Forward head already claims a closing gap when the face is growing too; this is
+    what is left over when the gap closes and the face does not follow — the
+    "either alone is ambiguous" case from :func:`_forward_head`, resolved the other
+    way. Gap-closing-alone used to simply not fire at all.
+    """
+    gap = _relative_excess(
+        metrics.head_shoulder_gap, base.get("head_shoulder_gap"),
+        t.forward_head_gap_drop, rising=False,
+    )
+    if gap is None or gap < 1.0:
+        return None
+    face = _relative_excess(
+        metrics.face_scale, base.get("face_scale"),
+        t.forward_head_face_rise, rising=True,
+    )
+    if face is not None and face >= 1.0:
+        return None  # forward head already explains this
+    return gap
+
+
 _CHECKS = {
     FaultKind.FORWARD_HEAD: _forward_head,
     FaultKind.SPINE_FLEXION: _spine_flexion,
     FaultKind.SCREEN_TOO_CLOSE: _screen_too_close,
     FaultKind.LATERAL_TILT: _lateral_tilt,
+    FaultKind.HEAD_ROTATION: _head_rotation,
+    FaultKind.SHOULDER_SHRUG: _shoulder_shrug,
 }
 
 
@@ -311,6 +380,7 @@ def evaluate_drift(
         tilt_degrees=thresholds.tilt_degrees * thresholds.drift_scale,
         torso_degrees=thresholds.torso_degrees * thresholds.drift_scale,
         sink_units=thresholds.sink_units * thresholds.drift_scale,
+        head_yaw_threshold=thresholds.head_yaw_threshold * thresholds.drift_scale,
     )
     median_metrics = PostureMetrics(
         **{

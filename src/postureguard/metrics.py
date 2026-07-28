@@ -48,6 +48,13 @@ class PostureMetrics:
     #: subject sinks. Unlike the ratios this one is not distance-normalized, so it is
     #: only meaningful against a baseline captured from the same camera position.
     shoulder_height: float | None = None
+    #: (nose.x - eye_mid.x) / inter-ocular distance. Near zero facing the camera;
+    #: grows in magnitude as the head turns toward either shoulder — a second-monitor
+    #: habit rather than a slouch. A heuristic proxy for yaw, not a measured angle:
+    #: the nose drifts off the eye midline under rotation because of perspective
+    #: foreshortening, which is plenty to catch a *sustained* turn even though it
+    #: is not a calibrated degree value.
+    head_yaw: float | None = None
 
     def any_available(self) -> bool:
         return any(getattr(self, f.name) is not None for f in fields(self))
@@ -66,6 +73,7 @@ METRIC_LABELS: dict[str, str] = {
     "eye_roll": "head tilt",
     "torso_angle": "torso lean",
     "shoulder_height": "seated height",
+    "head_yaw": "head turn",
 }
 
 
@@ -156,12 +164,18 @@ def compute_metrics(landmarks: Landmarks, aspect: float) -> PostureMetrics:
             to_square_units(right_eye, aspect), to_square_units(left_eye, aspect)
         )
 
+    head_yaw = None
+    nose = get("nose")
+    if nose is not None and eye_mid is not None and screen_distance:
+        head_yaw = (to_square_units(nose, aspect).x - eye_mid.x) / screen_distance
+
     if left_shoulder is None or right_shoulder is None:
         # Shoulder width is the yardstick every ratio is measured against. Without it
         # only the absolute metrics survive.
         return PostureMetrics(
             screen_distance=screen_distance,
             eye_roll=eye_roll,
+            head_yaw=head_yaw,
         )
 
     left_sh = to_square_units(left_shoulder, aspect)
@@ -176,6 +190,7 @@ def compute_metrics(landmarks: Landmarks, aspect: float) -> PostureMetrics:
             eye_roll=eye_roll,
             shoulder_roll=shoulder_roll,
             shoulder_height=shoulder_mid.y,
+            head_yaw=head_yaw,
         )
 
     head_shoulder_gap = None
@@ -201,4 +216,5 @@ def compute_metrics(landmarks: Landmarks, aspect: float) -> PostureMetrics:
         eye_roll=eye_roll,
         torso_angle=torso_angle,
         shoulder_height=shoulder_mid.y,
+        head_yaw=head_yaw,
     )

@@ -171,6 +171,8 @@ class MainWindow(QWidget):
             return "Snoozed"
         if state.reading.status == "searching":
             return "No subject"
+        if state.reading.status == "standing":
+            return "Standing"
         if fault is not None:
             return fault.title
         if state.reading.status == "drifting":

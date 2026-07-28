@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLineEdit,
+    QMessageBox,
     QScrollArea,
     QSlider,
     QSpinBox,
@@ -22,6 +26,7 @@ from ... import paths, theme
 from ...calibration import Baseline
 from ...config import Config
 from ...metrics import describe
+from ...session import SessionStore
 from ..widgets import Card, PageHeader, button, crisp, label, plain
 
 S = theme.SPACE
@@ -150,9 +155,12 @@ class SettingsScreen(QWidget):
     changed = Signal(object)  # Config
     recalibrate_requested = Signal()
 
-    def __init__(self, config: Config, cameras: list | None = None) -> None:
+    def __init__(
+        self, config: Config, cameras: list | None = None, store: SessionStore | None = None
+    ) -> None:
         super().__init__()
         self.config = config
+        self.store = store
         self._loading = True
 
         outer = QVBoxLayout(self)
@@ -180,6 +188,16 @@ class SettingsScreen(QWidget):
             "Your baseline is what every threshold is measured against. "
             "Recapture it whenever the camera or your chair moves.",
         )
+        calibration.add(label("Profile", "Eyebrow"))
+        self.profile = QComboBox()
+        self._reload_profiles(config.calibration_profile)
+        new_profile = button("New…", "Ghost")
+        new_profile.clicked.connect(self._create_profile)
+        profile_row = QHBoxLayout()
+        profile_row.addWidget(self.profile, 1)
+        profile_row.addWidget(new_profile)
+        calibration.add(plain(profile_row))
+
         self._baseline_note = label("", "Body")
         self._baseline_note.setWordWrap(True)
         calibration.add(self._baseline_note)
@@ -242,6 +260,17 @@ class SettingsScreen(QWidget):
         detection.add(
             Row("Mirroring", "Makes the view behave like a mirror, which is easier to correct against.", self.mirror)
         )
+
+        self.standing_detection = QCheckBox("Enabled")
+        self.standing_detection.setChecked(config.standing_detection_enabled)
+        detection.add(
+            Row(
+                "Standing detection",
+                "Pause checks while you're standing — your sitting baseline "
+                "doesn't apply, so guessing would be worse than not checking.",
+                self.standing_detection,
+            )
+        )
         layout.addWidget(detection)
 
         # --- interventions ---
@@ -276,6 +305,28 @@ class SettingsScreen(QWidget):
         self.alerts_enabled.setChecked(config.alerts_enabled)
         alerts.add(Row("Notifications", "A prompt naming the fault and the fix.", self.alerts_enabled))
 
+        self.suppress_when_fullscreen = QCheckBox("Enabled")
+        self.suppress_when_fullscreen.setChecked(config.suppress_when_fullscreen)
+        alerts.add(
+            Row(
+                "Hold back during fullscreen",
+                "Skip the notification and screen dimming while presenting, on a "
+                "call, or in a game. The overlay cue stays on.",
+                self.suppress_when_fullscreen,
+            )
+        )
+
+        self.alert_sound = QCheckBox("Enabled")
+        self.alert_sound.setChecked(config.alert_sound_enabled)
+        alerts.add(
+            Row(
+                "Alert sound",
+                "A short chime alongside the notification — the one channel that "
+                "reaches you if you're not looking at this screen at all.",
+                self.alert_sound,
+            )
+        )
+
         self.toast_after = SliderRow(
             "Notify after",
             "How long a fault must be ignored before the notification appears.",
@@ -303,6 +354,17 @@ class SettingsScreen(QWidget):
         )
         alerts.add(self.dim_opacity)
 
+        self.hotkeys_enabled = QCheckBox("Enabled")
+        self.hotkeys_enabled.setChecked(config.hotkeys_enabled)
+        alerts.add(
+            Row(
+                "Global hotkeys",
+                "Ctrl+Alt+P snoozes, Ctrl+Alt+R recalibrates — from anywhere, even "
+                "while another app has focus.",
+                self.hotkeys_enabled,
+            )
+        )
+
         self.snooze_minutes = QSpinBox()
         self.snooze_minutes.setRange(1, 120)
         self.snooze_minutes.setSuffix(" min")
@@ -322,6 +384,15 @@ class SettingsScreen(QWidget):
         self.break_interval.setSuffix(" min")
         self.break_interval.setValue(config.break_interval_minutes)
         breaks.add(Row("Break interval", "Working time between prompts.", self.break_interval))
+        self.weekly_summary_enabled = QCheckBox("Enabled")
+        self.weekly_summary_enabled.setChecked(config.weekly_summary_enabled)
+        breaks.add(
+            Row(
+                "Weekly summary",
+                "A once-a-week note naming the hour posture held up worst.",
+                self.weekly_summary_enabled,
+            )
+        )
         layout.addWidget(breaks)
 
         # --- power ---
@@ -356,6 +427,38 @@ class SettingsScreen(QWidget):
             )
         )
         layout.addWidget(power_card)
+
+        # --- startup ---
+        startup = Card("Startup")
+        self.launch_at_login = QCheckBox("Enabled")
+        self.launch_at_login.setChecked(config.launch_at_login)
+        startup.add(
+            Row(
+                "Launch at login",
+                "Start PostureGuard automatically when you sign in to Windows.",
+                self.launch_at_login,
+            )
+        )
+        self.start_minimized = QCheckBox("Enabled")
+        self.start_minimized.setChecked(config.start_minimized)
+        startup.add(
+            Row(
+                "Start minimized",
+                "Come up in the tray rather than opening the main window.",
+                self.start_minimized,
+            )
+        )
+        layout.addWidget(startup)
+
+        # --- appearance ---
+        appearance = Card("Appearance")
+        self.theme_mode = QComboBox()
+        self.theme_mode.addItem("Dark", "dark")
+        self.theme_mode.addItem("Light", "light")
+        index = self.theme_mode.findData(config.theme_mode)
+        self.theme_mode.setCurrentIndex(index if index >= 0 else 0)
+        appearance.add(Row("Theme", "The instrument palette, dark or light.", self.theme_mode))
+        layout.addWidget(appearance)
 
         # --- privacy ---
         privacy = Card("Privacy")
@@ -392,6 +495,16 @@ class SettingsScreen(QWidget):
         location.setObjectName("PathField")
         location.setCursorPosition(0)
         privacy.add(location)
+
+        data_actions = QHBoxLayout()
+        export_button = button("Export history…", "Secondary")
+        export_button.clicked.connect(self._export_history)
+        data_actions.addWidget(export_button)
+        delete_button = button("Delete all data…", "Secondary")
+        delete_button.clicked.connect(self._delete_all_data)
+        data_actions.addWidget(delete_button)
+        data_actions.addStretch(1)
+        privacy.add(plain(data_actions))
         layout.addWidget(privacy)
         layout.addStretch(1)
 
@@ -408,12 +521,17 @@ class SettingsScreen(QWidget):
         for check in (
             self.alerts_enabled, self.dim_enabled, self.mirror,
             self.breaks_enabled, self.mini_window, self.mini_always_on_top,
-            self.pause_when_locked, self.battery_saver,
+            self.pause_when_locked, self.battery_saver, self.standing_detection,
+            self.launch_at_login, self.start_minimized, self.alert_sound,
+            self.suppress_when_fullscreen, self.weekly_summary_enabled,
+            self.hotkeys_enabled,
         ):
             check.toggled.connect(self._emit)
         for spin in (self.break_interval, self.snooze_minutes, self.retention_days):
             spin.valueChanged.connect(self._emit)
         self.camera.currentIndexChanged.connect(self._emit)
+        self.profile.currentTextChanged.connect(self._on_profile_changed)
+        self.theme_mode.currentIndexChanged.connect(self._emit)
 
     def _emit(self) -> None:
         # Populating the controls fires their signals; without this guard the screen
@@ -425,35 +543,111 @@ class SettingsScreen(QWidget):
             # index once unavailable devices are excluded.
             camera_index=self.camera.currentData() if self.camera.currentData() is not None else 0,
             mirror=self.mirror.isChecked(),
+            standing_detection_enabled=self.standing_detection.isChecked(),
             sensitivity=self.sensitivity.slider.value() / 100,
             react_after_seconds=self.reaction.slider.value() / 10,
             alerts_enabled=self.alerts_enabled.isChecked(),
+            alert_sound_enabled=self.alert_sound.isChecked(),
+            suppress_when_fullscreen=self.suppress_when_fullscreen.isChecked(),
             toast_after_seconds=float(self.toast_after.slider.value()),
             dim_enabled=self.dim_enabled.isChecked(),
             dim_after_seconds=float(self.dim_after.slider.value()),
             dim_max_opacity=self.dim_opacity.slider.value() / 100,
             snooze_minutes=self.snooze_minutes.value(),
+            hotkeys_enabled=self.hotkeys_enabled.isChecked(),
             breaks_enabled=self.breaks_enabled.isChecked(),
             break_interval_minutes=self.break_interval.value(),
+            weekly_summary_enabled=self.weekly_summary_enabled.isChecked(),
             retention_days=self.retention_days.value(),
             mini_window=self.mini_window.isChecked(),
             mini_always_on_top=self.mini_always_on_top.isChecked(),
             pause_when_locked=self.pause_when_locked.isChecked(),
             pause_after_idle_minutes=self.pause_after_idle.slider.value(),
             battery_saver=self.battery_saver.isChecked(),
+            start_minimized=self.start_minimized.isChecked(),
+            launch_at_login=self.launch_at_login.isChecked(),
             # Carried through, not rebuilt. This constructor rebuilds Config from the
             # visible controls, so any field without one here silently reverts to its
             # default — which would throw away the mini window's saved position.
             mini_collapsed=self.config.mini_collapsed,
             mini_x=self.config.mini_x,
             mini_y=self.config.mini_y,
-            start_minimized=self.config.start_minimized,
-            launch_at_login=self.config.launch_at_login,
+            mini_screen=self.config.mini_screen,
+            calibration_profile=self.profile.currentText() or self.config.calibration_profile,
+            theme_mode=self.theme_mode.currentData() or "dark",
         )
         self.changed.emit(self.config)
 
+    def _reload_profiles(self, selected: str) -> None:
+        self.profile.blockSignals(True)
+        self.profile.clear()
+        for name in paths.list_profiles():
+            self.profile.addItem(name)
+        index = self.profile.findText(selected)
+        self.profile.setCurrentIndex(index if index >= 0 else 0)
+        self.profile.blockSignals(False)
+
+    def _create_profile(self) -> None:
+        name, ok = QInputDialog.getText(
+            self, "New profile", "Name this calibration (e.g. \"Standing desk\"):"
+        )
+        if not ok or not name.strip():
+            return
+        # paths.list_profiles() only lists profiles with a saved baseline, and this
+        # one does not have one yet — added to the combo directly rather than via a
+        # reload, which would not find it and silently fall back to "default".
+        # Selecting it below leaves the engine with no baseline to load, which is
+        # exactly what should start a fresh calibration for it.
+        sanitized = paths.sanitize_profile_name(name)
+        if self.profile.findText(sanitized) < 0:
+            self.profile.addItem(sanitized)
+        self.profile.setCurrentText(sanitized)
+
+    def _on_profile_changed(self) -> None:
+        if self._loading:
+            return
+        self._emit()
+        self.refresh()
+
+    def _export_history(self) -> None:
+        if self.store is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export history", "postureguard-history.csv", "CSV files (*.csv)"
+        )
+        if not path:
+            return
+        rows = self.store.export_csv(Path(path))
+        QMessageBox.information(
+            self, "Export complete", f"Wrote {rows} row{'s' if rows != 1 else ''} to {path}."
+        )
+
+    def _delete_all_data(self) -> None:
+        if self.store is None:
+            return
+        confirmed = QMessageBox.question(
+            self,
+            "Delete all data",
+            "This permanently deletes your entire posture history from this device. "
+            "Your baseline and settings are not affected. This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if confirmed != QMessageBox.StandardButton.Yes:
+            return
+        self.store.delete_all()
+        QMessageBox.information(self, "Data deleted", "Your posture history has been erased.")
+
+    def set_sensitivity(self, value: float) -> None:
+        """Reflect a sensitivity change made outside this screen — the automatic
+        backoff after repeated snoozes — without re-emitting `changed` for it."""
+        self._loading = True
+        self.sensitivity.slider.setValue(int(round(value * 100)))
+        self._loading = False
+
     def refresh(self) -> None:
-        baseline = Baseline.load(paths.baseline_path())
+        active_profile = self.profile.currentText() or self.config.calibration_profile
+        baseline = Baseline.load(paths.baseline_path(active_profile))
         if baseline is None:
             self._baseline_note.setText(
                 "No baseline yet. The Live screen will capture one the first time it sees you."

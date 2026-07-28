@@ -25,8 +25,8 @@ from PySide6.QtWidgets import (
 
 from . import theme
 
-TOAST_WIDTH = 380
-TOAST_MARGIN = 28
+TOAST_WIDTH = 320
+TOAST_MARGIN = 20
 TOAST_VISIBLE_MS = 7000
 
 
@@ -95,8 +95,8 @@ class Toast(QWidget):
         outer.addWidget(self._panel)
 
         layout = QVBoxLayout(self._panel)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(6)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(4)
 
         self._title = QLabel()
         self._title.setObjectName("ToastTitle")
@@ -108,7 +108,7 @@ class Toast(QWidget):
         layout.addWidget(self._cue)
 
         actions = QHBoxLayout()
-        actions.setSpacing(8)
+        actions.setSpacing(6)
         actions.addStretch(1)
 
         snooze = QPushButton("Snooze")
@@ -143,23 +143,23 @@ class Toast(QWidget):
         }}
         QLabel#ToastTitle {{
             font-family: "{theme.DISPLAY_FAMILY}";
-            font-size: 15px; font-weight: 600;
+            font-size: 13px; font-weight: 600;
             color: {theme.BONE.name()};
             background: transparent;
         }}
         QLabel#ToastCue {{
-            font-size: 12px;
+            font-size: 11px;
             color: {theme.MUTED.name()};
             background: transparent;
         }}
         QPushButton#ToastAction {{
             background: {theme.IN_TOLERANCE.name()}; color: {theme.INK.name()};
-            border: none; border-radius: 4px; padding: 5px 14px;
-            font-size: 12px; font-weight: 600;
+            border: none; border-radius: 4px; padding: 4px 12px;
+            font-size: 11px; font-weight: 600;
         }}
         QPushButton#ToastGhost {{
             background: transparent; color: {theme.MUTED.name()};
-            border: none; padding: 5px 10px; font-size: 12px;
+            border: none; padding: 4px 10px; font-size: 11px;
         }}
         QPushButton#ToastGhost:hover {{ color: {theme.BONE.name()}; }}
         """

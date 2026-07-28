@@ -25,6 +25,8 @@ class TestLibrary:
             FaultKind.SPINE_FLEXION,
             FaultKind.LATERAL_TILT,
             FaultKind.SCREEN_TOO_CLOSE,
+            FaultKind.HEAD_ROTATION,
+            FaultKind.SHOULDER_SHRUG,
         ],
     )
     def test_every_detectable_fault_has_a_routine(self, fault):

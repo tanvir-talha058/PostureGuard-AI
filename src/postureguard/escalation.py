@@ -89,7 +89,9 @@ class Escalator:
 
     # --- per-frame ----------------------------------------------------------------
 
-    def update(self, faults: Sequence[Fault], now: float) -> Intervention:
+    def update(
+        self, faults: Sequence[Fault], now: float, *, fullscreen_active: bool = False
+    ) -> Intervention:
         # Drift is a summary of the last ten minutes, not something to dim the screen
         # over. It gets a cue and nothing more.
         actionable = [f for f in faults if f.kind is not FaultKind.DRIFT]
@@ -104,7 +106,7 @@ class Escalator:
             self._fault_since = now
         held_for = now - self._fault_since
 
-        if self.is_suppressed(now) or not self.alerts_enabled:
+        if self.is_suppressed(now) or not self.alerts_enabled or fullscreen_active:
             return Intervention(level=Level.CUE, fault=primary, held_seconds=held_for)
 
         if held_for < self.toast_after_seconds:

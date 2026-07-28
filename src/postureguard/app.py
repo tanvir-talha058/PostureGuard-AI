@@ -6,14 +6,15 @@ import argparse
 import logging
 import sys
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QAbstractEventDispatcher, QTimer, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import paths, theme
+from . import autostart, paths, sound, theme
 from .alerts import DimOverlay, Toast, app_icon
 from .capture import available_cameras
 from .config import Config
+from .hotkeys import GlobalHotkeys
 from .session import SessionStore
 from .overlay import PostureOverlay, ViewModel
 from .ui.controller import MonitorController
@@ -23,6 +24,7 @@ from .ui.screens.history import HistoryScreen
 from .ui.screens.live import LiveScreen
 from .ui.screens.settings import SettingsScreen
 from .ui.window import MainWindow
+from .weekly_summary import WeeklySummaryGate, build_message
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +57,7 @@ class Application:
         # Real devices, by name. The picker used to offer a fixed "Camera 0/1/2" whether
         # or not those existed, so selecting one could tear down a working camera to
         # open nothing.
-        self.settings = SettingsScreen(config, available_cameras())
+        self.settings = SettingsScreen(config, available_cameras(), self.store)
 
         self.window.add_screen("live", self.live)
         self.window.add_screen("history", self.history)
@@ -64,6 +66,7 @@ class Application:
         self.window.show_screen("live")
 
         self.tray = self._build_tray()
+        self.hotkeys = self._build_hotkeys()
         self._connect()
 
         if self.settings.camera_was_corrected:
@@ -77,14 +80,23 @@ class Application:
             # uses the corrected index.
             self.settings._emit()
 
+        # Reconciled once at startup, not just on a settings change: the launch
+        # command embeds this executable's own path, which can drift after an
+        # update or a move even though the setting itself never changed.
+        autostart.apply(self.config.launch_at_login)
+
+        self.weekly_summary = WeeklySummaryGate.load(paths.weekly_summary_path())
+
         self._retention_timer = QTimer()
         self._retention_timer.setInterval(RETENTION_CHECK_INTERVAL_MS)
         self._retention_timer.timeout.connect(self._purge_old_history)
+        self._retention_timer.timeout.connect(self._maybe_show_weekly_summary)
         self._retention_timer.start()
         # QTimer.start() fires only after the first interval elapses; an install that
         # has been running since before this feature existed should not have to wait
         # a full day to actually get pruned.
         self._purge_old_history()
+        self._maybe_show_weekly_summary()
 
     # --- wiring -------------------------------------------------------------------
 
@@ -99,13 +111,14 @@ class Application:
         self.mini.hide_requested.connect(self._hide_mini)
         self.mini.moved.connect(self._remember_mini_position)
         self.mini.collapsed_changed.connect(self._remember_mini_collapsed)
-        self.controller.toast_requested.connect(self.toast.present)
+        self.controller.toast_requested.connect(self._on_toast_requested)
         self.controller.dim_changed.connect(self.dim.set_progress)
         self.controller.break_due.connect(self._on_break_due)
         self.controller.failed.connect(self._on_failure)
         self.controller.baseline_captured.connect(self.settings.refresh)
         self.controller.camera_health_changed.connect(self._on_camera_health)
         self.controller.paused_changed.connect(self._on_paused_changed)
+        self.controller.sensitivity_backed_off.connect(self._on_sensitivity_backed_off)
 
         # The frame rate only needs to be smooth for a window actually being watched;
         # the mini window's correction is legible at a far slower rate.
@@ -163,12 +176,41 @@ class Application:
         tray.show()
         return tray
 
+    def _build_hotkeys(self) -> GlobalHotkeys:
+        hotkeys = GlobalHotkeys(
+            on_snooze=lambda: self.controller.snooze(),
+            on_recalibrate=self.controller.recalibrate,
+        )
+        dispatcher = QAbstractEventDispatcher.instance()
+        if dispatcher is not None:
+            dispatcher.installNativeEventFilter(hotkeys)
+        if self.config.hotkeys_enabled:
+            hotkeys.register()
+        return hotkeys
+
     # --- handlers -----------------------------------------------------------------
 
     def _show_window(self) -> None:
         self.window.showNormal()
         self.window.raise_()
         self.window.activateWindow()
+
+    def _on_toast_requested(self, title: str, cue: str) -> None:
+        self.toast.present(title, cue)
+        if self.config.alert_sound_enabled:
+            sound.play_alert()
+
+    def _on_sensitivity_backed_off(self, sensitivity: float) -> None:
+        self.config.sensitivity = sensitivity
+        self.config.save(paths.config_path())
+        self.controller.apply_config(self.config)
+        self.settings.set_sensitivity(sensitivity)
+        self.toast.present(
+            "Sensitivity eased off",
+            "A few snoozes today, so PostureGuard backed off a notch. "
+            "Adjust anytime in Settings.",
+            theme.IN_TOLERANCE,
+        )
 
     def _on_break_due(self, routine) -> None:
         self.toast.present(
@@ -188,7 +230,16 @@ class Application:
 
         was_shown = self.config.mini_window
         retention_changed = config.retention_days != self.config.retention_days
+        login_changed = config.launch_at_login != self.config.launch_at_login
+        hotkeys_changed = config.hotkeys_enabled != self.config.hotkeys_enabled
+        theme_changed = config.theme_mode != self.config.theme_mode
         self.config = config
+        if login_changed:
+            autostart.apply(config.launch_at_login)
+        if hotkeys_changed:
+            self.hotkeys.register() if config.hotkeys_enabled else self.hotkeys.unregister()
+        if theme_changed:
+            self._apply_theme_mode(config.theme_mode)
         config.save(paths.config_path())
         self.controller.apply_config(config)
         self.dim.max_opacity = config.dim_max_opacity
@@ -201,9 +252,43 @@ class Application:
             # Shortening the window should take effect now, not tomorrow.
             self._purge_old_history()
 
+    def _apply_theme_mode(self, mode: str) -> None:
+        """Swap the palette and make every already-built surface catch up.
+
+        theme.set_mode() only reassigns the colour tokens themselves; the
+        stylesheet is a string baked at setStyleSheet() time, and anything painted
+        with QPainter (the mini window, the Live screen's skeleton, the charts)
+        only reads the new colours on its *next* repaint, which nothing here
+        forces on its own.
+        """
+        theme.set_mode(mode)
+        qt = QApplication.instance()
+        if qt is None:
+            return
+        qt.setStyleSheet(stylesheet())
+        for widget in qt.allWidgets():
+            widget.update()
+
     def _on_recalibrate_from_settings(self) -> None:
         self.controller.recalibrate()
         self.window.show_screen("live")
+
+    def _maybe_show_weekly_summary(self) -> None:
+        if not self.config.weekly_summary_enabled:
+            return
+        if not self.weekly_summary.last_shown:
+            # Nothing to summarize on day one. Seed the anchor so a summary becomes
+            # due one interval from now rather than firing on the very first launch.
+            self.weekly_summary.mark_shown()
+            self.weekly_summary.save_state(paths.weekly_summary_path())
+            return
+        if not self.weekly_summary.due():
+            return
+        message = build_message(self.store)
+        self.weekly_summary.mark_shown()
+        self.weekly_summary.save_state(paths.weekly_summary_path())
+        if message is not None:
+            self.toast.present("Your week in posture", message, theme.IN_TOLERANCE)
 
     def _purge_old_history(self) -> None:
         removed = self.store.purge_older_than(self.config.retention_days)
@@ -233,9 +318,24 @@ class Application:
             )
         )
 
+    def _resolve_mini_screen(self):
+        """The screen the mini window last lived on, or the primary if unplugged.
+
+        A saved position is only meaningful relative to the monitor it was placed
+        on — reapplying it against whatever screen happens to be primary today can
+        strand the panel on the wrong display when a second monitor is disconnected
+        or the arrangement changes.
+        """
+        name = self.config.mini_screen
+        if name:
+            for screen in QApplication.screens():
+                if screen.name() == name:
+                    return screen
+        return QApplication.primaryScreen()
+
     def _place_mini(self) -> None:
         """Restore the saved corner, or default to bottom-right on first run."""
-        screen = QApplication.primaryScreen()
+        screen = self._resolve_mini_screen()
         if screen is None:
             return
         area = screen.availableGeometry()
@@ -251,6 +351,9 @@ class Application:
 
     def _remember_mini_position(self, x: int, y: int) -> None:
         self.config.mini_x, self.config.mini_y = x, y
+        screen = self.mini.screen()
+        if screen is not None:
+            self.config.mini_screen = screen.name()
         self.config.save(paths.config_path())
 
     def _remember_mini_collapsed(self, collapsed: bool) -> None:
@@ -350,6 +453,7 @@ class Application:
             return
         self._shut_down = True
         self._retention_timer.stop()
+        self.hotkeys.unregister()
         self.controller.stop()
         self.dim.hide()
         self.toast.hide()
@@ -384,6 +488,15 @@ def main(argv: list[str] | None = None) -> int:
     # scale factor (1.5 on this project's own dev display) rather than Qt's default
     # of rounding it to the nearest whole number first — the default is what most
     # visibly breaks pixel-grid alignment (see ui/widgets.crisp) on a 125%/150% screen.
+    config = Config.load(paths.config_path())
+    if args.camera is not None:
+        config.camera_index = args.camera
+    if args.recalibrate:
+        paths.baseline_path(config.calibration_profile).unlink(missing_ok=True)
+    # Set before the stylesheet is ever generated, or the very first paint would be
+    # dark regardless of what was saved and only catch up on the next config change.
+    theme.set_mode(config.theme_mode)
+
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
@@ -393,12 +506,6 @@ def main(argv: list[str] | None = None) -> int:
     qt.setStyleSheet(stylesheet())
     # The tray keeps the app alive; closing the window should not end the session.
     qt.setQuitOnLastWindowClosed(False)
-
-    config = Config.load(paths.config_path())
-    if args.camera is not None:
-        config.camera_index = args.camera
-    if args.recalibrate:
-        paths.baseline_path().unlink(missing_ok=True)
 
     application = Application(config)
     # start() always brings the window up, even if the camera failed to open — see

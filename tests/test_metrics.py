@@ -117,6 +117,22 @@ class TestDegradation:
         assert not metrics.any_available()
 
 
+class TestHeadYaw:
+    def test_facing_the_camera_reads_near_zero(self):
+        assert m(UPRIGHT).head_yaw == pytest.approx(0.0, abs=1e-6)
+
+    def test_turning_the_head_shifts_the_nose_off_the_eye_midline(self):
+        points = dict(build(UPRIGHT).points)
+        nose = points["nose"]
+        points["nose"] = Point(nose.x + 0.02, nose.y, visibility=nose.visibility)
+        metrics = compute_metrics(Landmarks(points), aspect=ASPECT)
+        assert metrics.head_yaw > 0
+
+    def test_missing_nose_yields_no_yaw(self):
+        points = {k: v for k, v in build(UPRIGHT).points.items() if k != "nose"}
+        assert compute_metrics(Landmarks(points), aspect=ASPECT).head_yaw is None
+
+
 class TestSingleSided:
     def test_one_visible_ear_is_enough_for_the_gap(self):
         points = dict(build(UPRIGHT).points)

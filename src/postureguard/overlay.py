@@ -31,16 +31,21 @@ from . import theme
 from .metrics import PostureMetrics
 from .rules import Fault, FaultKind
 
-HEADER_HEIGHT = 30
-FAULT_HEIGHT = 68
-READINGS_HEIGHT = 34
-CORNER_RADIUS = 10
+HEADER_HEIGHT = 26
+FAULT_HEIGHT = 62
+READINGS_HEIGHT = 28
+CORNER_RADIUS = 8
 
 #: Collapsed, the panel is a single bar carrying the instruction and nothing else.
 #: No camera, no skeleton, no readings — at this size they would be decoration, and
 #: what the user needs mid-task is the correction, not the evidence for it.
-COLLAPSED_HEIGHT = 46
-ACCENT_BAR_WIDTH = 3
+COLLAPSED_HEIGHT = 36
+ACCENT_BAR_WIDTH = 2
+
+#: The panel sets its own inset rather than borrowing the main window's gutter. At
+#: this width a 14px margin reads as slack; the two surfaces are different scales and
+#: should not be forced onto one spacing value.
+PAD = 12
 
 STATUS_LABELS = {
     "starting": "STARTING",
@@ -48,6 +53,7 @@ STATUS_LABELS = {
     "searching": "NO SUBJECT",
     "camera_lost": "CAMERA LOST",
     "paused": "PAUSED",
+    "standing": "STANDING",
     "in_tolerance": "IN TOLERANCE",
     "drifting": "DRIFTING",
     "fault": "OUT OF TOLERANCE",
@@ -296,22 +302,22 @@ class PostureOverlay(QWidget):
         # A coloured edge carries the state even when the text is not being read.
         painter.fillRect(QRectF(0, 0, ACCENT_BAR_WIDTH, surface.height()), colour)
 
-        left = ACCENT_BAR_WIDTH + theme.GUTTER
+        left = ACCENT_BAR_WIDTH + PAD
         held = self.model.held_seconds
         note = f"{int(held)}s" if fault is not None and held >= 5 else ""
-        note_width = 44 if note else 0
+        note_width = 36 if note else 0
 
         painter.setFont(theme.reading_label_font())
         painter.setPen(theme.MUTED)
         if note:
             painter.drawText(
-                QRectF(surface.width() - note_width - theme.GUTTER, 0, note_width, surface.height()),
+                QRectF(surface.width() - note_width - PAD, 0, note_width, surface.height()),
                 int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
                 note,
             )
 
         text_rect = QRectF(
-            left, 0, surface.width() - left - note_width - theme.GUTTER * 1.5, surface.height()
+            left, 0, surface.width() - left - note_width - PAD * 1.5, surface.height()
         )
         painter.setFont(theme.fault_title_font())
 
@@ -340,6 +346,8 @@ class PostureOverlay(QWidget):
             return "Camera disconnected"
         if status == "paused":
             return self.model.message or "Paused — no activity"
+        if status == "standing":
+            return self.model.message or "Standing — not tracked"
         if status == "searching":
             # The engine already sends "Step into view" here — an instruction, not
             # just a label — which is exactly the register this panel wants.
@@ -357,7 +365,7 @@ class PostureOverlay(QWidget):
         painter.setFont(theme.eyebrow_font())
         painter.setPen(theme.MUTED)
         painter.drawText(
-            QRectF(theme.GUTTER, 0, 160, HEADER_HEIGHT),
+            QRectF(PAD, 0, 120, HEADER_HEIGHT),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             "Postureguard",
         )
@@ -365,7 +373,7 @@ class PostureOverlay(QWidget):
         label = STATUS_LABELS.get(self.model.status, self.model.status.upper())
         painter.setPen(self.accent)
         painter.drawText(
-            QRectF(self.width() - 190 - theme.GUTTER, 0, 190, HEADER_HEIGHT),
+            QRectF(self.width() - 150 - PAD, 0, 150, HEADER_HEIGHT),
             int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
             label,
         )
@@ -375,7 +383,7 @@ class PostureOverlay(QWidget):
         painter.setBrush(self.accent)
         text_width = painter.fontMetrics().horizontalAdvance(label)
         painter.drawEllipse(
-            QRectF(self.width() - theme.GUTTER - text_width - 14, HEADER_HEIGHT / 2 - 2.5, 5, 5)
+            QRectF(self.width() - PAD - text_width - 12, HEADER_HEIGHT / 2 - 2.5, 5, 5)
         )
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
@@ -395,7 +403,7 @@ class PostureOverlay(QWidget):
             painter.setFont(theme.cue_font())
             painter.setPen(theme.MUTED)
             painter.drawText(
-                rect.adjusted(theme.GUTTER, 0, -theme.GUTTER, 0),
+                rect.adjusted(PAD, 0, -PAD, 0),
                 int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap),
                 self._resting_text(),
             )
@@ -408,7 +416,7 @@ class PostureOverlay(QWidget):
         painter.setFont(theme.fault_title_font())
         painter.setPen(theme.BONE)
         painter.drawText(
-            QRectF(theme.GUTTER, rect.top() + 5, self.width() - 100, 19),
+            QRectF(PAD, rect.top() + 4, self.width() - 90, 18),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             fault.title,
         )
@@ -416,7 +424,7 @@ class PostureOverlay(QWidget):
         painter.setFont(theme.fault_title_font())
         painter.setPen(theme.FAULT)
         painter.drawText(
-            QRectF(self.width() - 80 - theme.GUTTER, rect.top() + 5, 80, 19),
+            QRectF(self.width() - 64 - PAD, rect.top() + 4, 64, 18),
             int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
             f"{fault.severity:.1f}×",
         )
@@ -437,15 +445,16 @@ class PostureOverlay(QWidget):
             note = ""
         if note:
             painter.drawText(
-                QRectF(self.width() - 90 - theme.GUTTER, rect.top() + 22, 90, 10),
+                QRectF(self.width() - 90 - PAD, rect.top() + 22, 90, 11),
                 int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
                 note,
             )
 
         painter.setFont(theme.cue_font())
         painter.setPen(theme.with_alpha(theme.BONE, 205))
+        # Two lines of cue at this width, kept clear of the right-hand note column.
         painter.drawText(
-            QRectF(theme.GUTTER, rect.top() + 26, self.width() - 2 * theme.GUTTER - 46, 38),
+            QRectF(PAD, rect.top() + 22, self.width() - 2 * PAD - 52, 36),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap),
             fault.cue,
         )
@@ -464,21 +473,21 @@ class PostureOverlay(QWidget):
             ("tilt", metrics.eye_roll, "{:+.0f}°"),
             ("sink", metrics.shoulder_height, "{:.2f}"),
         ]
-        column_width = (self.width() - 2 * theme.GUTTER) / len(columns)
+        column_width = (self.width() - 2 * PAD) / len(columns)
 
         for index, (label, value, fmt) in enumerate(columns):
-            x = theme.GUTTER + index * column_width
+            x = PAD + index * column_width
             painter.setFont(theme.reading_label_font())
             painter.setPen(theme.MUTED)
             painter.drawText(
-                QRectF(x, rect.top() + 5, column_width, 10),
+                QRectF(x, rect.top() + 4, column_width, 9),
                 int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
                 label,
             )
             painter.setFont(theme.reading_font())
             painter.setPen(theme.BONE if value is not None else theme.RULE)
             painter.drawText(
-                QRectF(x, rect.top() + 15, column_width, 14),
+                QRectF(x, rect.top() + 13, column_width, 13),
                 int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
                 fmt.format(value) if value is not None else "—",
             )

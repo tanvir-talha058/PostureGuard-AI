@@ -15,7 +15,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .. import paths, power
+from .. import paths, power, presentation
+from ..backoff import SnoozeBackoff
 from ..calibration import Baseline
 from ..capture import Camera, CameraConfig, CameraError
 from ..config import Config
@@ -70,6 +71,10 @@ class MonitorController(QObject):
     baseline_captured = Signal()
     camera_health_changed = Signal(bool)
     paused_changed = Signal(bool)
+    #: Emitted with the new, lower sensitivity when repeated same-day snoozes have
+    #: triggered an automatic backoff. The controller does not own `Config`
+    #: persistence — the app wires this to actually save it and tell the user.
+    sensitivity_backed_off = Signal(float)
 
     def __init__(self, config: Config, store: SessionStore) -> None:
         super().__init__()
@@ -85,6 +90,7 @@ class MonitorController(QObject):
         self.breaks = BreakTimer.load_restored(
             paths.break_state_path(), config.break_interval_minutes, config.breaks_enabled
         )
+        self.backoff = SnoozeBackoff.load(paths.snooze_backoff_path())
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -97,6 +103,10 @@ class MonitorController(QObject):
         # main window actually shows, its showEvent corrects this (see window.py).
         self._window_visible = False
         self._paused_for_activity = False
+        # Checked on the same slow cadence as idle/lock, not every frame — the
+        # foreground window does not change fast enough to need more, and it is one
+        # more Win32 round trip per tick otherwise.
+        self._fullscreen_active = False
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(ACTIVITY_CHECK_INTERVAL_MS)
         self._activity_timer.timeout.connect(self._evaluate_activity)
@@ -131,7 +141,9 @@ class MonitorController(QObject):
             return False
 
         self.engine = Engine(
-            Baseline.load(paths.baseline_path()), self.config.thresholds()
+            Baseline.load(paths.baseline_path(self.config.calibration_profile)),
+            self.config.thresholds(),
+            standing_detection_enabled=self.config.standing_detection_enabled,
         )
         self._started_at = time.monotonic()
         self._running = True
@@ -175,6 +187,14 @@ class MonitorController(QObject):
         self.escalator.suppress(minutes * 60, now)
         self.dim_changed.emit(0.0)
 
+        if self.config.auto_backoff_enabled:
+            triggered = self.backoff.record()
+            self.backoff.save_state(paths.snooze_backoff_path())
+            if triggered:
+                lowered = SnoozeBackoff.next_sensitivity(self.config.sensitivity)
+                if lowered < self.config.sensitivity:
+                    self.sensitivity_backed_off.emit(lowered)
+
     def apply_config(self, config: Config) -> None:
         """Adopt changed settings without dropping the session.
 
@@ -182,9 +202,14 @@ class MonitorController(QObject):
         and several seconds of blank screen, so only the pieces that actually depend
         on a changed value are rebuilt.
         """
-        camera_changed = (
+        # A changed camera/mirror obviously needs the pipeline rebuilt; so does a
+        # changed profile — a different baseline file the engine has to be rebuilt
+        # against, rather than kept running with thresholds derived from someone
+        # else's calibration. Same restart, different trigger.
+        needs_restart = (
             config.camera_index != self.config.camera_index
             or config.mirror != self.config.mirror
+            or config.calibration_profile != self.config.calibration_profile
         )
         self.config = config
         self.escalator = self._build_escalator()
@@ -192,8 +217,9 @@ class MonitorController(QObject):
         self.breaks.interval_seconds = config.break_interval_minutes * 60.0
         if self.engine is not None:
             self.engine.thresholds = config.thresholds()
+            self.engine.standing_detection_enabled = config.standing_detection_enabled
 
-        if camera_changed:
+        if needs_restart:
             # Not gated on self._running: if the previously configured camera never
             # opened at all (a stale/removed device saved from a prior session), the
             # controller comes up with _running still False, and picking a working
@@ -236,6 +262,9 @@ class MonitorController(QObject):
     def _evaluate_activity(self) -> None:
         if not self._running or self.camera is None:
             return
+        self._fullscreen_active = (
+            self.config.suppress_when_fullscreen and presentation.foreground_is_fullscreen()
+        )
         locked = self.config.pause_when_locked and power.session_locked()
         idle = (
             self.config.pause_after_idle_minutes > 0
@@ -299,11 +328,14 @@ class MonitorController(QObject):
         reading = self.engine.process(landmarks, aspect, now)
 
         if reading.baseline_just_captured and reading.baseline is not None:
-            reading.baseline.save(paths.baseline_path())
+            target = paths.baseline_path(self.config.calibration_profile)
+            reading.baseline.save(target)
             self.baseline_captured.emit()
-            log.info("Baseline saved to %s", paths.baseline_path())
+            log.info("Baseline saved to %s", target)
 
-        intervention = self.escalator.update(reading.faults, now)
+        intervention = self.escalator.update(
+            reading.faults, now, fullscreen_active=self._fullscreen_active
+        )
         if intervention.toast_now and intervention.fault is not None:
             self.toast_requested.emit(intervention.fault.title, intervention.fault.cue)
         self.dim_changed.emit(

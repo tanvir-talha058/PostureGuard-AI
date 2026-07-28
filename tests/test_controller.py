@@ -181,6 +181,75 @@ class TestFrameRate:
         assert control._timer.interval() == controller_module.FRAME_INTERVAL_MS
 
 
+class TestSnoozeBackoff:
+    @pytest.fixture
+    def isolated_home(self, tmp_path, monkeypatch):
+        # SnoozeBackoff persists to paths.snooze_backoff_path(); route it to a
+        # scratch dir so this test can never touch the real user's app data.
+        monkeypatch.setenv("POSTUREGUARD_HOME", str(tmp_path))
+        return tmp_path
+
+    def test_emits_after_the_threshold_number_of_snoozes(self, qt_app, isolated_home):
+        from postureguard.backoff import SNOOZE_THRESHOLD
+
+        control = controller(qt_app)
+        control._running = True
+        emitted = []
+        control.sensitivity_backed_off.connect(emitted.append)
+
+        for _ in range(SNOOZE_THRESHOLD - 1):
+            control.snooze()
+        assert emitted == []
+        control.snooze()
+        assert len(emitted) == 1
+        assert emitted[0] < control.config.sensitivity
+
+    def test_disabled_in_config_never_emits(self, qt_app, isolated_home):
+        from postureguard.backoff import SNOOZE_THRESHOLD
+
+        control = controller(qt_app)
+        control._running = True
+        control.config.auto_backoff_enabled = False
+        emitted = []
+        control.sensitivity_backed_off.connect(emitted.append)
+
+        for _ in range(SNOOZE_THRESHOLD + 2):
+            control.snooze()
+        assert emitted == []
+
+
+class TestFullscreenSuppression:
+    def _control(self, qt_app):
+        control = controller(qt_app)
+        control._running = True
+        return control
+
+    def test_a_fullscreen_foreground_window_is_flagged(self, qt_app, monkeypatch):
+        from postureguard.ui import controller as controller_module
+
+        monkeypatch.setattr(controller_module.power, "session_locked", lambda: False)
+        monkeypatch.setattr(controller_module.power, "idle_seconds", lambda: 0.0)
+        monkeypatch.setattr(controller_module.presentation, "foreground_is_fullscreen", lambda: True)
+        control = self._control(qt_app)
+
+        control._evaluate_activity()
+
+        assert control._fullscreen_active is True
+
+    def test_disabled_in_config_never_checks_the_platform(self, qt_app, monkeypatch):
+        from postureguard.ui import controller as controller_module
+
+        monkeypatch.setattr(controller_module.power, "session_locked", lambda: False)
+        monkeypatch.setattr(controller_module.power, "idle_seconds", lambda: 0.0)
+        monkeypatch.setattr(controller_module.presentation, "foreground_is_fullscreen", lambda: True)
+        control = self._control(qt_app)
+        control.config.suppress_when_fullscreen = False
+
+        control._evaluate_activity()
+
+        assert control._fullscreen_active is False
+
+
 class TestActivityPause:
     def _control(self, qt_app):
         control = controller(qt_app)

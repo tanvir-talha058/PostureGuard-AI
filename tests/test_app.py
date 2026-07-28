@@ -164,6 +164,50 @@ class TestBrokenCameraDoesNotBrickStartup:
             application.shutdown()
 
 
+class TestThemeSwitching:
+    def test_changing_theme_in_settings_applies_it_live(
+        self, qt_app, isolated_home, no_dialogs, monkeypatch
+    ):
+        from postureguard import theme
+
+        rig(monkeypatch, fails_for=frozenset())
+        application = Application(Config(camera_index=0, mini_window=False))
+        try:
+            assert theme.mode() == "dark"
+            index = application.settings.theme_mode.findData("light")
+            application.settings.theme_mode.setCurrentIndex(index)
+            assert theme.mode() == "light"
+            assert application.config.theme_mode == "light"
+        finally:
+            application.shutdown()
+            theme.set_mode("dark")  # process-global state; never leak into other tests
+
+
+class TestMiniWindowRemembersItsMonitor:
+    def test_falls_back_to_the_primary_screen_when_the_saved_name_is_unknown(
+        self, qt_app, isolated_home, no_dialogs, monkeypatch
+    ):
+        rig(monkeypatch, fails_for=frozenset())
+        application = Application(Config(camera_index=0, mini_window=False, mini_screen="a monitor that unplugged itself"))
+        try:
+            assert application._resolve_mini_screen() is QApplication.primaryScreen()
+        finally:
+            application.shutdown()
+
+    def test_moving_the_mini_window_persists_the_screen_it_landed_on(
+        self, qt_app, isolated_home, no_dialogs, monkeypatch
+    ):
+        rig(monkeypatch, fails_for=frozenset())
+        application = Application(Config(camera_index=0, mini_window=True))
+        try:
+            application._place_mini()
+            application._remember_mini_position(application.mini.x(), application.mini.y())
+            primary = QApplication.primaryScreen()
+            assert application.config.mini_screen == (primary.name() if primary else "")
+        finally:
+            application.shutdown()
+
+
 class TestFixingTheCameraFromSettingsAfterAFailedStart:
     """Distinct from the self-heal above: this is the user manually picking a
     different camera in the Settings screen after the app already came up broken."""

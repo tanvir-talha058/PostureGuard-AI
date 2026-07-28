@@ -53,6 +53,62 @@ class Config:
     #: Last position on screen. -1 means "not placed yet, put it bottom-right".
     mini_x: int = -1
     mini_y: int = -1
+    #: Name of the screen the mini window last lived on. Empty means "not recorded
+    #: yet, use the primary screen". A saved position is only meaningful relative to
+    #: the monitor it was placed on — reapplying raw coordinates against whatever
+    #: screen happens to be primary today can drop the panel on the wrong display
+    #: entirely when a second monitor is unplugged or the arrangement changes.
+    mini_screen: str = ""
+
+    # --- interventions: sound ---
+    #: A short chime alongside the toast. Off by default — the visual ladder already
+    #: covers the desk, and sound is the one channel that reaches past a phone or a
+    #: second monitor, which also makes it the one most likely to be unwelcome
+    #: unasked-for in a shared office.
+    alert_sound_enabled: bool = False
+
+    # --- interventions: presentation ---
+    #: Hold every rung past the overlay cue while the foreground window is fullscreen
+    #: — a screen-shared presentation, a video call, a game. A full-screen dim layer
+    #: appearing mid-slide is the kind of failure that gets a tool like this uninstalled
+    #: by the people it embarrassed, not just the person using it.
+    suppress_when_fullscreen: bool = True
+
+    # --- interventions: sensitivity backoff ---
+    #: Snoozing the same fault repeatedly is the user telling the app it is too
+    #: twitchy for their current setup, more directly than any slider. After enough
+    #: snoozes in a day this nudges `sensitivity` down a step on its own, once, and
+    #: says so — rather than requiring them to find Settings mid-workday.
+    auto_backoff_enabled: bool = True
+
+    # --- breaks: weekly summary ---
+    #: A once-a-week notification naming the day and hour posture held up worst,
+    #: built from history the app is already recording. Purely informational — it
+    #: does not gate anything and can be turned off without affecting detection.
+    weekly_summary_enabled: bool = True
+
+    # --- calibration ---
+    #: Name of the active baseline profile. Lets someone who splits time between an
+    #: office desk and a home desk keep two calibrations rather than recalibrating
+    #: twice a day. "default" always exists; others are created from Settings.
+    calibration_profile: str = "default"
+
+    # --- posture: standing ---
+    #: A sitting baseline does not apply to a standing posture — the whole frame
+    #: geometry shifts. When this is on, a sustained shift consistent with standing
+    #: up switches the status to "standing" and suspends the sitting-calibrated fault
+    #: checks rather than misapplying them, until the user sits back down.
+    standing_detection_enabled: bool = True
+
+    # --- appearance ---
+    #: "dark" (the default instrument palette) or "light".
+    theme_mode: str = "dark"
+
+    # --- hotkeys ---
+    #: Global keyboard shortcuts for Snooze and Recalibrate, reachable even when
+    #: PostureGuard is not the focused window — the two actions someone reaches for
+    #: without wanting to alt-tab away from what they were doing.
+    hotkeys_enabled: bool = True
 
     # --- data ---
     #: How long session history is kept before it is purged automatically. 0 keeps

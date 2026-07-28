@@ -124,3 +124,21 @@ class TestQuiet:
         escalator = ladder(dim_enabled=False)
         escalator.update(CRANING, now=0)
         assert escalator.update(CRANING, now=500).level is Level.TOAST
+
+    def test_fullscreen_holds_it_at_the_cue(self):
+        """A presentation or a game covering the whole screen is not a moment to
+        dim it — but the overlay cue, drawn on the small always-on-top panel, is
+        fine to keep showing."""
+        escalator = ladder()
+        escalator.update(CRANING, now=0)
+        held = escalator.update(CRANING, now=500, fullscreen_active=True)
+        assert held.level is Level.CUE
+
+    def test_escalation_resumes_once_fullscreen_ends(self):
+        """The held-time clock kept running underneath the suppression, so ending
+        the fullscreen window picks the ladder back up where it left off rather
+        than treating it as a fresh fault."""
+        escalator = ladder()
+        escalator.update(CRANING, now=0)
+        escalator.update(CRANING, now=15, fullscreen_active=True)
+        assert escalator.update(CRANING, now=16).level is Level.TOAST

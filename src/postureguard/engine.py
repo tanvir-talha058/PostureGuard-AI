@@ -13,7 +13,7 @@ from enum import Enum
 from .calibration import Baseline, BaselineBuilder, DriftTracker
 from .landmarks import Landmarks
 from .metrics import PostureMetrics, compute_metrics
-from .rules import Fault, FaultKind, RuleEngine, Thresholds, evaluate_drift
+from .rules import Debounce, Fault, FaultKind, RuleEngine, Thresholds, evaluate_drift
 
 
 class Phase(str, Enum):
@@ -29,6 +29,12 @@ CAPTURE_SECONDS = 5.0
 #: Drift is re-checked on this cadence rather than every frame; it moves slowly and
 #: the median is not cheap.
 DRIFT_INTERVAL_SECONDS = 20.0
+#: Frame-height units the shoulders must rise (shoulder_height fall) before the scene
+#: reads as "standing" rather than an ordinary posture change. Deliberately far larger
+#: than any single fault's own sink/rise threshold — a false positive here suppresses
+#: every sitting-calibrated check at once rather than flagging one, so it needs to be
+#: unambiguous, not merely over threshold.
+STANDING_RISE_UNITS = 0.15
 #: How long the subject may vanish mid-calibration before the countdown restarts.
 #: Pose detection drops the odd frame on a live camera — blinking, a hand crossing the
 #: torso, a motion-blurred turn. Restarting on the first missed frame means calibration
@@ -58,11 +64,13 @@ class Engine:
         thresholds: Thresholds | None = None,
         prep_seconds: float = PREP_SECONDS,
         capture_seconds: float = CAPTURE_SECONDS,
+        standing_detection_enabled: bool = True,
     ) -> None:
         self.thresholds = thresholds or Thresholds()
         self.baseline = baseline
         self.prep_seconds = prep_seconds
         self.capture_seconds = capture_seconds
+        self.standing_detection_enabled = standing_detection_enabled
 
         self._rules = RuleEngine(baseline, self.thresholds) if baseline else None
         self._drift = DriftTracker()
@@ -74,6 +82,10 @@ class Engine:
         self._phase_started: float | None = None
         self._last_seen: float | None = None
         self.snoozed_until = 0.0
+
+        # The same enter/exit-frame debounce the rule engine uses for faults, so
+        # standing up does not flicker the status on a single noisy frame.
+        self._standing_debounce = Debounce()
 
     # --- control ------------------------------------------------------------------
 
@@ -93,6 +105,7 @@ class Engine:
         self._last_seen = None
         self._drift.reset()
         self._drift_fault = None
+        self._standing_debounce = Debounce()
 
     def snooze(self, seconds: float, now: float) -> None:
         self.snoozed_until = now + seconds
@@ -186,6 +199,26 @@ class Engine:
             message=f"Hold it — {remaining:.0f}",
         )
 
+    # --- standing -------------------------------------------------------------
+
+    def _update_standing(self, metrics: PostureMetrics) -> bool:
+        """Debounced sitting/standing switch, from how far shoulder_height has
+        risen above its baseline. Drives the same `Debounce` primitive `_FaultState`
+        uses in rules.py — as a side effect this also picks up its hysteresis band
+        (exit_ratio), so standing releases once posture drops well below the rise
+        threshold rather than the instant it dips under it."""
+        base_height = self.baseline.get("shoulder_height") if self.baseline else None
+        risen = (
+            base_height - metrics.shoulder_height
+            if base_height is not None and metrics.shoulder_height is not None
+            else None
+        )
+        value = 0.0 if risen is None else max(risen / STANDING_RISE_UNITS, 0.0)
+        return self._standing_debounce.update(
+            value, self.thresholds.enter_frames, self.thresholds.exit_frames,
+            self.thresholds.exit_ratio,
+        )
+
     # --- monitoring ---------------------------------------------------------------
 
     def _monitor(
@@ -193,18 +226,28 @@ class Engine:
     ) -> Reading:
         assert self._rules is not None
 
-        faults = self._rules.update(metrics)
-        self._drift.add(metrics, now)
+        standing = self.standing_detection_enabled and self._update_standing(metrics)
 
-        if now - self._last_drift_check >= DRIFT_INTERVAL_SECONDS:
-            self._last_drift_check = now
-            self._drift_fault = evaluate_drift(
-                self.baseline, self._drift.medians(), self.thresholds
-            )
-        if self._drift_fault is not None and not any(
-            f.kind is FaultKind.DRIFT for f in faults
-        ):
-            faults = [*faults, self._drift_fault]
+        if standing:
+            # The sitting baseline does not apply to a standing posture — the whole
+            # frame geometry shifted. Feed the rule engine nothing rather than these
+            # metrics, so any fault raised while seated releases through its own
+            # hysteresis (the same path a lost subject already takes) instead of
+            # staying latched against a baseline that no longer describes the scene.
+            faults = self._rules.update(PostureMetrics())
+        else:
+            faults = self._rules.update(metrics)
+            self._drift.add(metrics, now)
+
+            if now - self._last_drift_check >= DRIFT_INTERVAL_SECONDS:
+                self._last_drift_check = now
+                self._drift_fault = evaluate_drift(
+                    self.baseline, self._drift.medians(), self.thresholds
+                )
+            if self._drift_fault is not None and not any(
+                f.kind is FaultKind.DRIFT for f in faults
+            ):
+                faults = [*faults, self._drift_fault]
 
         # "No subject" is about whether anything was measurable, not about whether a
         # landmark object came back — a detection with every joint occluded tells us
@@ -215,6 +258,8 @@ class Engine:
             status = "snoozed"
         elif not present:
             status = "searching"
+        elif standing:
+            status = "standing"
         elif any(f.kind is not FaultKind.DRIFT for f in faults):
             status = "fault"
         elif faults:
@@ -222,11 +267,18 @@ class Engine:
         else:
             status = "in_tolerance"
 
+        if not present:
+            message = "Step into view"
+        elif status == "standing":
+            message = "Standing — not tracked"
+        else:
+            message = ""
+
         return Reading(
             landmarks=landmarks,
             metrics=metrics,
             faults=faults,
             status=status,
-            message="" if present else "Step into view",
+            message=message,
             baseline=self.baseline,
         )

@@ -132,6 +132,40 @@ class TestSnooze:
         assert drive(engine, build(SLUMPED), seconds=3.0, start=t + 1.5).status == "fault"
 
 
+class TestStanding:
+    def test_standing_up_reports_standing_and_suspends_checks(self):
+        engine, t = calibrated()
+        reading = drive(engine, build(Pose(shoulder_y=0.40)), seconds=2.0, start=t)
+        assert reading.status == "standing"
+        assert reading.faults == []
+
+    def test_a_small_rise_is_not_mistaken_for_standing(self):
+        """Far short of the threshold — an ordinary posture shift, not standing up."""
+        engine, t = calibrated()
+        reading = drive(engine, build(Pose(shoulder_y=0.55)), seconds=2.0, start=t)
+        assert reading.status != "standing"
+
+    def test_sitting_back_down_resumes_checks(self):
+        engine, t = calibrated()
+        drive(engine, build(Pose(shoulder_y=0.40)), seconds=2.0, start=t)
+        reading = drive(engine, build(SLUMPED), seconds=2.0, start=t + 2)
+        assert reading.status == "fault"
+        assert FaultKind.FORWARD_HEAD in {f.kind for f in reading.faults}
+
+    def test_disabling_it_never_reports_standing(self):
+        engine, t = calibrated()
+        engine.standing_detection_enabled = False
+        reading = drive(engine, build(Pose(shoulder_y=0.40)), seconds=2.0, start=t)
+        assert reading.status != "standing"
+
+    def test_standing_time_is_not_counted_as_measurable_presence_for_drift(self):
+        """Standing must not silently bank samples into the sitting drift window."""
+        engine, t = calibrated()
+        drive(engine, build(Pose(shoulder_y=0.40)), seconds=5.0, start=t)
+        reading = drive(engine, build(UPRIGHT), seconds=1.0, start=t + 5)
+        assert FaultKind.DRIFT not in {f.kind for f in reading.faults}
+
+
 class TestDrift:
     def test_slow_sinking_is_caught_even_without_an_instant_fault(self):
         """The afternoon slide: never past a threshold, but worse than baseline."""

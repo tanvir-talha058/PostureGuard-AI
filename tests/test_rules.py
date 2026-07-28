@@ -12,6 +12,7 @@ GOOD = PostureMetrics(
     eye_roll=0.0,
     torso_angle=0.0,
     shoulder_height=0.620,
+    head_yaw=0.0,
 )
 
 BASELINE = baseline_from([GOOD])
@@ -161,6 +162,26 @@ class TestOtherFaults:
         assert FaultKind.LATERAL_TILT in kinds(
             run(engine, metrics(shoulder_roll=-13.0), 30)
         )
+
+    def test_a_turned_head_flags_head_rotation(self):
+        engine = RuleEngine(BASELINE, FAST)
+        assert FaultKind.HEAD_ROTATION in kinds(run(engine, metrics(head_yaw=0.55), 30))
+
+    def test_a_shrugged_gap_without_a_growing_face_flags_shoulder_shrug(self):
+        """The gap closes exactly as forward head's does, but the face is not
+        growing — so this is the shoulders lifting, not the head craning in."""
+        engine = RuleEngine(BASELINE, FAST)
+        faults = kinds(run(engine, metrics(head_shoulder_gap=0.333), 30))
+        assert FaultKind.SHOULDER_SHRUG in faults
+        assert FaultKind.FORWARD_HEAD not in faults
+
+    def test_a_closing_gap_with_a_growing_face_is_forward_head_not_a_shrug(self):
+        """Forward head already explains a closing gap once the face grows too —
+        shoulder shrug must not also fire for the same evidence."""
+        engine = RuleEngine(BASELINE, FAST)
+        faults = kinds(run(engine, CRANING, 30))
+        assert FaultKind.FORWARD_HEAD in faults
+        assert FaultKind.SHOULDER_SHRUG not in faults
 
 
 class TestSeverity:

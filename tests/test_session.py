@@ -141,6 +141,50 @@ class TestRetention:
         assert store.purge_older_than(-5, today=TODAY) == 0
 
 
+class TestDeleteAll:
+    def test_removes_every_row(self, store):
+        # Chronological order: `log` rate-limits by wall-clock time, so writing an
+        # earlier day after a later one would have the later timestamp block it.
+        fill(store, TODAY - timedelta(days=5), 10, 5, "fault", CRANING)
+        fill(store, TODAY, 10, 10, "in_tolerance")
+        assert store.delete_all() == 15
+        assert store.today(TODAY).tracked_seconds == 0
+        assert store.daily_summaries(days=14, today=TODAY)[-1].tracked_seconds == 0
+
+    def test_empty_store_removes_nothing(self, store):
+        assert store.delete_all() == 0
+
+
+class TestExportCsv:
+    def test_writes_one_row_per_sample_with_a_header(self, store, tmp_path):
+        fill(store, TODAY, 9, 3, "in_tolerance")
+        fill(store, TODAY, 10, 2, "fault", CRANING)
+        out = tmp_path / "history.csv"
+        written = store.export_csv(out)
+        assert written == 5
+        lines = out.read_text(encoding="utf-8").splitlines()
+        assert lines[0] == "timestamp,day,hour,status,fault,severity"
+        assert len(lines) == 6  # header + 5 rows
+
+    def test_fault_column_is_the_fault_name_when_present(self, store, tmp_path):
+        fill(store, TODAY, 10, 1, "fault", CRANING)
+        out = tmp_path / "history.csv"
+        store.export_csv(out)
+        row = out.read_text(encoding="utf-8").splitlines()[1]
+        assert "forward_head" in row
+
+    def test_creates_parent_directories(self, store, tmp_path):
+        fill(store, TODAY, 10, 1, "in_tolerance")
+        out = tmp_path / "nested" / "history.csv"
+        assert store.export_csv(out) == 1
+        assert out.exists()
+
+    def test_empty_store_writes_header_only(self, store, tmp_path):
+        out = tmp_path / "history.csv"
+        assert store.export_csv(out) == 0
+        assert len(out.read_text(encoding="utf-8").splitlines()) == 1
+
+
 class TestSchemaVersioning:
     def test_a_fresh_database_is_stamped_with_the_current_version(self, store):
         from postureguard.session import SCHEMA_VERSION

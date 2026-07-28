@@ -25,6 +25,9 @@ postureguard --recalibrate   # discard the baseline and capture a new one
 postureguard --camera 1      # pick a different camera
 ```
 
+Without installing the package first, `python run.py` works the same way — it just adds
+`src/` to the path itself. Same flags apply: `python run.py --recalibrate`.
+
 On first launch it records a five-second baseline of you sitting up straight. Every
 threshold afterwards is a deviation from *that*, not from a textbook ideal.
 
@@ -38,6 +41,8 @@ Recalibrate whenever the camera or your chair moves.
 | Slouching | shoulders sink in frame, or the torso vector tilts when hips are visible |
 | Too close to the screen | inter-ocular distance grows in absolute terms |
 | Leaning to one side | eye line or shoulder line rolls away from your baseline |
+| Turned to the side | the nose drifts off the eye midline — a sustained turn toward a side monitor |
+| Shoulders raised | ear-to-shoulder gap closes **without** the face growing — the shoulders lifting, not the head craning in |
 | Drift | a 10-minute rolling median degrades without ever crossing a threshold |
 
 ### The head-on camera problem
@@ -66,7 +71,7 @@ border brightens and breathes once escalation begins, and a `HELD 68S` readout s
 
 ### Collapsed to a bar
 
-Double-click it to shade the panel down to a single 46px bar showing **only the
+Double-click it to shade the panel down to a single 36px bar showing **only the
 instruction** — "Pull your chin back", "Sit tall — chest up" — with the elapsed time on
 the right. No camera, no skeleton, no readings: at that size they would be decoration,
 and what you need mid-task is the correction, not the evidence for it.

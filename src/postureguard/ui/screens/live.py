@@ -82,7 +82,10 @@ class VideoView(QWidget):
         accent = theme.STATE_COLORS.get(reading.status, theme.MUTED)
 
         render.draw_plumb_line(painter, reading.landmarks, transform)
-        if reading.baseline is not None:
+        # The band marks where the ears sit relative to a *sitting* baseline; standing
+        # moves the whole frame geometry, so drawing it here would show a stale line
+        # in the wrong place rather than nothing.
+        if reading.baseline is not None and reading.status != "standing":
             render.draw_tolerance_band(
                 painter,
                 reading.landmarks,
@@ -175,6 +178,15 @@ class CorrectionCard(Card):
             return
         if reading.status == "snoozed":
             self._show("Snoozed", "Alerts are paused. Monitoring continues.", theme.MUTED, "Status")
+            return
+        if reading.status == "standing":
+            self._show(
+                "Standing",
+                "Your sitting baseline doesn't apply here, so nothing is being "
+                "checked until you sit back down.",
+                theme.MUTED,
+                "Status",
+            )
             return
 
         actionable = [f for f in reading.faults if f.kind is not FaultKind.DRIFT]

@@ -8,6 +8,17 @@ soft dots, tabular monospace readings, and a DIN-derived label face.
 One deliberate departure from convention: good posture reads *steel blue*, not green.
 Green/red is the health-app reflex and it moralizes at the user all day. Blue reads as
 "within tolerance", which is instrument language — a measurement, not a verdict.
+
+## Light mode
+
+The palette below is swappable via :func:`set_mode` — every module reads these as
+`theme.INK`, `theme.BONE` and so on at paint time rather than importing the names
+directly, so reassigning them here is visible everywhere immediately. The light
+variant mirrors the dark one's structure (same roles, same relative contrast) rather
+than being a straight inversion, but it has **not** been through the same OKLCH /
+colour-vision-deficiency validation pass the dark palette and the `SERIES` chart
+colours document above went through — treat it as a good-faith first pass, not a
+re-validated design token set.
 """
 
 from __future__ import annotations
@@ -16,26 +27,48 @@ from PySide6.QtGui import QColor, QFont
 
 # --- Colour ----------------------------------------------------------------------
 
-SIDEBAR = QColor("#0E1116")  # recessed navigation rail
-INK = QColor("#12151A")  # deep blue-charcoal ground, never pure black
-PANEL = QColor("#1C2027")  # raised surface
-PANEL_HOVER = QColor("#232833")
-RULE = QColor("#2C323C")  # hairline dividers
-BONE = QColor("#E8E4DA")  # skeleton and primary text, warm off-white
-MUTED = QColor("#7C8698")  # labels, secondary readings
-FAINT = QColor("#4C5567")  # disabled, axis ticks
+_DARK = {
+    "SIDEBAR": "#0E1116",       # recessed navigation rail
+    "INK": "#12151A",           # deep blue-charcoal ground, never pure black
+    "PANEL": "#1C2027",         # raised surface
+    "PANEL_HOVER": "#232833",
+    "RULE": "#2C323C",          # hairline dividers
+    "BONE": "#E8E4DA",          # skeleton and primary text, warm off-white
+    "MUTED": "#7C8698",         # labels, secondary readings
+    "FAINT": "#4C5567",         # disabled, axis ticks
+    "IN_TOLERANCE": "#4A90A4",  # calm state, plumb line, tolerance band
+    "WARNING": "#E4933F",       # drifting, or a mild fault
+    "FAULT": "#D64545",         # active fault
+}
 
-IN_TOLERANCE = QColor("#4A90A4")  # calm state, plumb line, tolerance band
-WARNING = QColor("#E4933F")  # drifting, or a mild fault
-FAULT = QColor("#D64545")  # active fault
+_LIGHT = {
+    "SIDEBAR": "#EDE9E0",       # recessed navigation rail, a shade off the ground
+    "INK": "#F6F3EC",           # warm paper ground, never pure white
+    "PANEL": "#FFFFFF",         # raised surface
+    "PANEL_HOVER": "#F1ECE1",
+    "RULE": "#DAD3C3",          # hairline dividers
+    "BONE": "#211E19",          # skeleton and primary text, warm near-black
+    "MUTED": "#5B6472",         # labels, secondary readings
+    "FAINT": "#A9ADB6",         # disabled, axis ticks
+    "IN_TOLERANCE": "#3D7A8B",  # deepened from the dark value for contrast on paper
+    "WARNING": "#B5661F",
+    "FAULT": "#B23A3A",
+}
 
 # Categorical series colours, for charts that encode *identity* (which fault) rather
 # than *state* (how bad). Kept strictly separate from the status colours above: reusing
 # the fault red as "series 4" would make a neutral breakdown chart read as an alarm.
 #
-# Assigned in fixed order and never cycled. Validated against the #1C2027 card surface
-# for the OKLCH lightness band, chroma floor, adjacent-pair separation under protanopia
-# / deuteranopia / tritanopia, and 3:1 contrast — see docs for the validator invocation.
+# Assigned in fixed order. Validated against the #1C2027 card surface for the OKLCH
+# lightness band, chroma floor, adjacent-pair separation under protanopia / deuteranopia
+# / tritanopia, and 3:1 contrast — see docs for the validator invocation.
+#
+# Only 5 entries have been through that validation. `rules.FaultKind` has since grown
+# past 5 members (history.py's breakdown chart indexes in with `% len(SERIES)`), so a
+# 6th+ fault kind cycles back to an already-used colour rather than getting a genuinely
+# distinct one. Extending this list needs the validator re-run, not five more hex codes
+# typed by hand — a hand-picked addition is exactly the kind of "looks fine to me" call
+# this list exists to not depend on.
 SERIES = [
     QColor("#4A9ACB"),  # blue
     QColor("#B08A22"),  # gold
@@ -44,15 +77,59 @@ SERIES = [
     QColor("#D26A56"),  # coral
 ]
 
-STATE_COLORS = {
-    "calibrating": MUTED,
-    "searching": MUTED,
-    "camera_lost": WARNING,
-    "paused": MUTED,
-    "in_tolerance": IN_TOLERANCE,
-    "drifting": WARNING,
-    "fault": FAULT,
-}
+
+def mode() -> str:
+    """The active palette: "dark" or "light"."""
+    return _mode
+
+
+def set_mode(new_mode: str) -> None:
+    """Swap every base colour token in place. Anything but "light" means dark.
+
+    Reassigns the module globals rather than mutating the existing `QColor`
+    objects — every consumer reads `theme.INK` etc. fresh at paint time (never
+    `from .theme import INK`), so a plain reassignment here is exactly as visible
+    to them as a mutation would be, without needing to parse a colour string back
+    into an object that already exists.
+
+    Two things this does *not* do on its own, because they are not colour state:
+    the application stylesheet (`ui.design.stylesheet()`) is a string baked at
+    `setStyleSheet()` time and needs regenerating and reapplying; and already-
+    painted widgets need a repaint requested. Both are the caller's job — see
+    `app.Application._apply_theme_mode`.
+    """
+    global _mode, SIDEBAR, INK, PANEL, PANEL_HOVER, RULE, BONE, MUTED, FAINT
+    global IN_TOLERANCE, WARNING, FAULT, STATE_COLORS
+
+    palette = _LIGHT if new_mode == "light" else _DARK
+    _mode = "light" if new_mode == "light" else "dark"
+
+    SIDEBAR = QColor(palette["SIDEBAR"])
+    INK = QColor(palette["INK"])
+    PANEL = QColor(palette["PANEL"])
+    PANEL_HOVER = QColor(palette["PANEL_HOVER"])
+    RULE = QColor(palette["RULE"])
+    BONE = QColor(palette["BONE"])
+    MUTED = QColor(palette["MUTED"])
+    FAINT = QColor(palette["FAINT"])
+    IN_TOLERANCE = QColor(palette["IN_TOLERANCE"])
+    WARNING = QColor(palette["WARNING"])
+    FAULT = QColor(palette["FAULT"])
+    STATE_COLORS = {
+        "calibrating": MUTED,
+        "searching": MUTED,
+        "camera_lost": WARNING,
+        "paused": MUTED,
+        "in_tolerance": IN_TOLERANCE,
+        "drifting": WARNING,
+        "fault": FAULT,
+    }
+
+
+# Establishes SIDEBAR, INK, ..., STATE_COLORS and _mode on first import — the one
+# assignment of these globals, rather than a separate copy here plus what set_mode()
+# does, so a new token added to _DARK/_LIGHT only has one place to also wire up.
+set_mode("dark")
 
 
 def with_alpha(color: QColor, alpha: int) -> QColor:
@@ -90,8 +167,8 @@ def eyebrow_font() -> QFont:
 
 
 def fault_title_font() -> QFont:
-    font = _font(DISPLAY_FAMILY, DISPLAY_FALLBACKS, 15, QFont.Weight.DemiBold)
-    font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.4)
+    font = _font(DISPLAY_FAMILY, DISPLAY_FALLBACKS, 13, QFont.Weight.DemiBold)
+    font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.3)
     return font
 
 
@@ -112,7 +189,7 @@ def reading_label_font() -> QFont:
 
 # --- Metrics ---------------------------------------------------------------------
 
-PANEL_WIDTH = 360
+PANEL_WIDTH = 320
 VIDEO_HEIGHT = 240
 GUTTER = 14
 HAIRLINE = 1

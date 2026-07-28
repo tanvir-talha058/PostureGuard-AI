@@ -12,6 +12,7 @@ which SQLite aggregates without breaking a sweat.
 
 from __future__ import annotations
 
+import csv
 import sqlite3
 import time
 from collections import Counter
@@ -221,6 +222,41 @@ class SessionStore:
         cursor = self._db.execute("DELETE FROM samples WHERE day < ?", (cutoff.isoformat(),))
         self._db.commit()
         return cursor.rowcount
+
+    def delete_all(self) -> int:
+        """Erase every stored sample. Returns rows removed.
+
+        For the user who wants to walk away with nothing left behind — the privacy
+        promise this app makes is only real if there is a door, not just a retention
+        timer that eventually gets around to it.
+        """
+        cursor = self._db.execute("DELETE FROM samples")
+        self._db.commit()
+        return cursor.rowcount
+
+    # --- export ---------------------------------------------------------------
+
+    def export_csv(self, path: Path) -> int:
+        """Write every stored sample to a CSV file. Returns rows written.
+
+        The same columns the schema holds and nothing more — one status, one
+        optional fault name, one severity number per second. There is no image data
+        to leave out, but the export mirroring the schema exactly is itself part of
+        the privacy story: what you get is provably everything, not a curated subset.
+        """
+        rows = self._db.execute(
+            "SELECT ts, day, hour, status, fault, severity FROM samples ORDER BY ts"
+        ).fetchall()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["timestamp", "day", "hour", "status", "fault", "severity"])
+            for ts, day, hour, status, fault, severity in rows:
+                writer.writerow([
+                    datetime.fromtimestamp(ts).isoformat(timespec="seconds"),
+                    day, hour, status, fault or "", severity,
+                ])
+        return len(rows)
 
     def purge_older_than(self, days: int, today: date | None = None) -> int:
         """Delete rows more than `days` days old. `days <= 0` keeps everything.
