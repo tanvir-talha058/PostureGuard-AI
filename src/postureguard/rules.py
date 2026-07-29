@@ -15,7 +15,7 @@ close *and* the face to grow. Pushing the chair back moves one; only real cranin
 both, because both are already normalized by shoulder width.
 
 **Alerts need sustained evidence and are sticky once raised.** A fault must hold for
-``enter_frames`` before it exists, and once raised it only clears when the signal falls
+``enter_seconds`` before it exists, and once raised it only clears when the signal falls
 well below where it entered. Without both, the user gets a strobe light at the threshold.
 """
 
@@ -27,6 +27,17 @@ from typing import Mapping
 
 from .calibration import Baseline
 from .metrics import PostureMetrics
+
+#: Debounce timers are driven by wall-clock ``dt``, not a call count, so behaviour is
+#: identical whether frames arrive at 30fps (main window open) or 5fps (mini window
+#: only, on battery). This is the nominal frame duration a caller's ``dt`` defaults to
+#: when it does not track real elapsed time itself — e.g. in tests that drive the
+#: engine one synthetic "frame" per call.
+NOMINAL_FRAME_SECONDS = 1.0 / 30.0
+
+#: Slack for float accumulation error in the seconds-elapsed comparisons below, so
+#: summing ``dt`` many times never misses a boundary by a fraction of a nanosecond.
+_EPSILON = 1e-9
 
 
 class FaultKind(str, Enum):
@@ -126,10 +137,10 @@ class Thresholds:
     #: threshold, not a calibrated angle — see the metric's own docstring.
     head_yaw_threshold: float = 0.35
 
-    #: Consecutive frames over threshold before a fault is raised.
-    enter_frames: int = 15
-    #: Consecutive frames under the exit threshold before it is dropped.
-    exit_frames: int = 5
+    #: Seconds continuously over threshold before a fault is raised.
+    enter_seconds: float = 15 / 30
+    #: Seconds continuously under the exit threshold before it is dropped.
+    exit_seconds: float = 5 / 30
     #: A raised fault clears only below this fraction of its entry threshold.
     exit_ratio: float = 0.8
 
@@ -139,41 +150,55 @@ class Thresholds:
 
 
 class Debounce:
-    """Enter/exit-frame debounce with a hysteresis band, over a signal expressed as
+    """Enter/exit-time debounce with a hysteresis band, over a signal expressed as
     a ratio to threshold (>=1.0 means "over").
 
+    Timers accumulate real elapsed seconds (``dt``), not a count of calls, so the
+    same ``enter_seconds`` means the same dwell time regardless of how often the
+    caller actually samples — the frame rate here drops from 30fps to 5fps depending
+    on whether the main window is open and whether the machine is on battery, and a
+    frame-counted debounce would silently let "sustained for 0.5s" become "sustained
+    for 3s" under exactly that kind of throttling.
+
     Generalized out of what fault detection needs — "sustained past a threshold for
-    N frames, released only once it falls well below that threshold for M frames" —
+    N seconds, released only once it falls well below that threshold for M seconds" —
     so anything with the same shape can reuse it instead of hand-rolling its own
-    counters. `_FaultState` below is this plus severity tracking; `engine.Engine`'s
+    timers. `_FaultState` below is this plus severity tracking; `engine.Engine`'s
     sitting/standing switch is this with nothing else.
     """
 
     def __init__(self) -> None:
         self.active = False
-        self._over = 0
-        self._under = 0
+        self._over_seconds = 0.0
+        self._under_seconds = 0.0
 
-    def update(self, value: float, enter_frames: int, exit_frames: int, exit_ratio: float) -> bool:
+    def update(
+        self,
+        value: float,
+        enter_seconds: float,
+        exit_seconds: float,
+        exit_ratio: float,
+        dt: float = NOMINAL_FRAME_SECONDS,
+    ) -> bool:
         if not self.active:
             if value >= 1.0:
-                self._over += 1
-                self._under = 0
-                if self._over >= enter_frames:
+                self._over_seconds += dt
+                self._under_seconds = 0.0
+                if self._over_seconds >= enter_seconds - _EPSILON:
                     self.active = True
             else:
                 # Strict reset: a brief lapse must never accumulate into an alert.
-                self._over = 0
+                self._over_seconds = 0.0
             return self.active
 
         if value < exit_ratio:
-            self._under += 1
-            if self._under >= exit_frames:
+            self._under_seconds += dt
+            if self._under_seconds >= exit_seconds - _EPSILON:
                 self.active = False
-                self._over = 0
-                self._under = 0
+                self._over_seconds = 0.0
+                self._under_seconds = 0.0
         else:
-            self._under = 0
+            self._under_seconds = 0.0
         return self.active
 
 
@@ -188,13 +213,18 @@ class _FaultState:
     def active(self) -> bool:
         return self._debounce.active
 
-    def update(self, excess: float | None, thresholds: Thresholds) -> bool:
+    def update(
+        self,
+        excess: float | None,
+        thresholds: Thresholds,
+        dt: float = NOMINAL_FRAME_SECONDS,
+    ) -> bool:
         # No measurement is not evidence of good posture, but it is not evidence of
         # bad posture either — treat it as clean so faults release when the user
         # leaves rather than latching on forever.
         value = 0.0 if excess is None else excess
         active = self._debounce.update(
-            value, thresholds.enter_frames, thresholds.exit_frames, thresholds.exit_ratio
+            value, thresholds.enter_seconds, thresholds.exit_seconds, thresholds.exit_ratio, dt
         )
         # Whatever value crossed the enter threshold this frame is itself >= 1.0
         # (entry requires it), so this covers both "just entered" and "still active"
@@ -332,12 +362,16 @@ class RuleEngine:
     def __post_init__(self) -> None:
         self._states = {kind: _FaultState() for kind in _CHECKS}
 
-    def update(self, metrics: PostureMetrics) -> list[Fault]:
-        """Feed one frame. Returns the currently raised faults, worst first."""
+    def update(
+        self, metrics: PostureMetrics, dt: float = NOMINAL_FRAME_SECONDS
+    ) -> list[Fault]:
+        """Feed one frame, ``dt`` seconds after the previous one. Returns the
+        currently raised faults, worst first."""
         faults: list[Fault] = []
         for kind, check in _CHECKS.items():
             state = self._states[kind]
-            if state.update(check(metrics, self.baseline, self.thresholds), self.thresholds):
+            excess = check(metrics, self.baseline, self.thresholds)
+            if state.update(excess, self.thresholds, dt):
                 faults.append(
                     Fault(
                         kind=kind,

@@ -16,7 +16,9 @@ GOOD = PostureMetrics(
 )
 
 BASELINE = baseline_from([GOOD])
-FAST = Thresholds(enter_frames=3, exit_frames=2)
+# Frame-equivalent at the default dt (NOMINAL_FRAME_SECONDS = 1/30s), so `run()`
+# feeding N calls at the default dt behaves exactly like the old frame-counted debounce.
+FAST = Thresholds(enter_seconds=3 / 30, exit_seconds=2 / 30)
 
 
 def metrics(**overrides) -> PostureMetrics:

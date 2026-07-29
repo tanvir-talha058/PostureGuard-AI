@@ -130,16 +130,22 @@ class Config:
     start_minimized: bool = False
     launch_at_login: bool = False
 
-    def thresholds(self, frame_rate: float = 30.0) -> Thresholds:
+    def thresholds(self) -> Thresholds:
         """Detection thresholds implied by the current sensitivity.
 
         Higher sensitivity means a *smaller* deviation counts, so thresholds divide
         by it. Clamped so a slider at either end cannot produce a threshold of zero
         (everything faults) or infinity (nothing ever does).
+
+        ``react_after_seconds`` is used directly as the dwell time rather than being
+        converted through an assumed frame rate — the actual capture rate varies from
+        30fps (main window open) down to 5fps (mini window only, on battery), and the
+        debounce itself now runs on wall-clock seconds (see rules.Debounce), so no
+        conversion is needed or correct here.
         """
         scale = 1.0 / max(min(self.sensitivity, 2.0), 0.25)
         base = Thresholds()
-        frames = max(int(self.react_after_seconds * frame_rate), 1)
+        enter_seconds = max(self.react_after_seconds, 0.01)
         return Thresholds(
             forward_head_gap_drop=base.forward_head_gap_drop * scale,
             forward_head_face_rise=base.forward_head_face_rise * scale,
@@ -147,8 +153,8 @@ class Config:
             tilt_degrees=base.tilt_degrees * scale,
             torso_degrees=base.torso_degrees * scale,
             sink_units=base.sink_units * scale,
-            enter_frames=frames,
-            exit_frames=max(frames // 3, 1),
+            enter_seconds=enter_seconds,
+            exit_seconds=max(enter_seconds / 3, 0.01),
             exit_ratio=base.exit_ratio,
             drift_scale=base.drift_scale,
         )

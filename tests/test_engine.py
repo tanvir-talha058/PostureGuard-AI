@@ -6,7 +6,7 @@ from postureguard.rules import FaultKind, Thresholds
 
 from fixtures import ASPECT, SLUMPED, UPRIGHT, Pose, build
 
-FAST = Thresholds(enter_frames=3, exit_frames=2)
+FAST = Thresholds(enter_seconds=3 / 30, exit_seconds=2 / 30)
 EMPTY = Landmarks({})
 
 

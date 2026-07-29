@@ -25,13 +25,13 @@ class TestSensitivity:
             assert 0 < thresholds.forward_head_gap_drop < 1
             assert thresholds.tilt_degrees > 0
 
-    def test_reaction_time_converts_to_frames(self):
-        thresholds = Config(react_after_seconds=1.0).thresholds(frame_rate=30)
-        assert thresholds.enter_frames == 30
+    def test_reaction_time_sets_the_enter_dwell_directly(self):
+        thresholds = Config(react_after_seconds=1.0).thresholds()
+        assert thresholds.enter_seconds == 1.0
 
-    def test_reaction_time_never_rounds_down_to_zero_frames(self):
-        assert Config(react_after_seconds=0.001).thresholds(frame_rate=30).enter_frames == 1
-        assert Config(react_after_seconds=0.001).thresholds(frame_rate=30).exit_frames == 1
+    def test_reaction_time_never_rounds_down_to_zero(self):
+        assert Config(react_after_seconds=0.0).thresholds().enter_seconds > 0
+        assert Config(react_after_seconds=0.0).thresholds().exit_seconds > 0
 
 
 class TestPersistence:

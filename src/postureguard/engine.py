@@ -13,7 +13,15 @@ from enum import Enum
 from .calibration import Baseline, BaselineBuilder, DriftTracker
 from .landmarks import Landmarks
 from .metrics import PostureMetrics, compute_metrics
-from .rules import Debounce, Fault, FaultKind, RuleEngine, Thresholds, evaluate_drift
+from .rules import (
+    NOMINAL_FRAME_SECONDS,
+    Debounce,
+    Fault,
+    FaultKind,
+    RuleEngine,
+    Thresholds,
+    evaluate_drift,
+)
 
 
 class Phase(str, Enum):
@@ -41,6 +49,12 @@ STANDING_RISE_UNITS = 0.15
 #: never finishes in practice, so brief gaps are tolerated and only a sustained absence
 #: counts as the user having left.
 CALIBRATION_GRACE_SECONDS = 1.0
+#: Ceiling on the elapsed time fed to the fault/standing debounce as a single ``dt``.
+#: Frames normally arrive every 33ms-400ms depending on window visibility and battery
+#: state, but a resume from an idle/lock pause or a stalled camera can hand the engine
+#: a gap of minutes. Without a cap, that one jump could instantly satisfy or clear a
+#: "sustained for N seconds" threshold that was never actually observed continuously.
+MAX_FRAME_DT_SECONDS = 1.0
 
 
 @dataclass
@@ -81,6 +95,7 @@ class Engine:
         self._phase = Phase.MONITORING if baseline else Phase.PREPARING
         self._phase_started: float | None = None
         self._last_seen: float | None = None
+        self._last_frame_time: float | None = None
         self.snoozed_until = 0.0
 
         # The same enter/exit-frame debounce the rule engine uses for faults, so
@@ -103,6 +118,7 @@ class Engine:
         self._phase = Phase.PREPARING
         self._phase_started = None
         self._last_seen = None
+        self._last_frame_time = None
         self._drift.reset()
         self._drift_fault = None
         self._standing_debounce = Debounce()
@@ -121,9 +137,21 @@ class Engine:
         metrics = (
             compute_metrics(landmarks, aspect) if landmarks is not None else PostureMetrics()
         )
+        dt = self._frame_dt(now)
         if self._phase is Phase.MONITORING:
-            return self._monitor(landmarks, metrics, now)
+            return self._monitor(landmarks, metrics, now, dt)
         return self._calibrate(landmarks, metrics, now)
+
+    def _frame_dt(self, now: float) -> float:
+        """Real elapsed time since the previous processed frame, for the debounce
+        timers — capped so a long gap cannot be mistaken for sustained evidence."""
+        dt = (
+            NOMINAL_FRAME_SECONDS
+            if self._last_frame_time is None
+            else now - self._last_frame_time
+        )
+        self._last_frame_time = now
+        return min(max(dt, 0.0), MAX_FRAME_DT_SECONDS)
 
     # --- calibration --------------------------------------------------------------
 
@@ -201,7 +229,7 @@ class Engine:
 
     # --- standing -------------------------------------------------------------
 
-    def _update_standing(self, metrics: PostureMetrics) -> bool:
+    def _update_standing(self, metrics: PostureMetrics, dt: float) -> bool:
         """Debounced sitting/standing switch, from how far shoulder_height has
         risen above its baseline. Drives the same `Debounce` primitive `_FaultState`
         uses in rules.py — as a side effect this also picks up its hysteresis band
@@ -215,18 +243,18 @@ class Engine:
         )
         value = 0.0 if risen is None else max(risen / STANDING_RISE_UNITS, 0.0)
         return self._standing_debounce.update(
-            value, self.thresholds.enter_frames, self.thresholds.exit_frames,
-            self.thresholds.exit_ratio,
+            value, self.thresholds.enter_seconds, self.thresholds.exit_seconds,
+            self.thresholds.exit_ratio, dt,
         )
 
     # --- monitoring ---------------------------------------------------------------
 
     def _monitor(
-        self, landmarks: Landmarks | None, metrics: PostureMetrics, now: float
+        self, landmarks: Landmarks | None, metrics: PostureMetrics, now: float, dt: float
     ) -> Reading:
         assert self._rules is not None
 
-        standing = self.standing_detection_enabled and self._update_standing(metrics)
+        standing = self.standing_detection_enabled and self._update_standing(metrics, dt)
 
         if standing:
             # The sitting baseline does not apply to a standing posture — the whole
@@ -234,9 +262,9 @@ class Engine:
             # metrics, so any fault raised while seated releases through its own
             # hysteresis (the same path a lost subject already takes) instead of
             # staying latched against a baseline that no longer describes the scene.
-            faults = self._rules.update(PostureMetrics())
+            faults = self._rules.update(PostureMetrics(), dt)
         else:
-            faults = self._rules.update(metrics)
+            faults = self._rules.update(metrics, dt)
             self._drift.add(metrics, now)
 
             if now - self._last_drift_check >= DRIFT_INTERVAL_SECONDS:
