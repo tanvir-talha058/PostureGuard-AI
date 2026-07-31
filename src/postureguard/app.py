@@ -150,6 +150,8 @@ class Application:
             qt.screenAdded.connect(self._maybe_auto_switch_profile)
             qt.screenRemoved.connect(self._maybe_auto_switch_profile)
 
+        self.window.sidebar.theme_toggle_requested.connect(self._on_theme_toggle_requested)
+
         # Closing the window hides it; monitoring continues from the tray. Tearing the
         # camera down here would silently stop the thing the user installed the app
         # for, with no indication that it had stopped.
@@ -278,12 +280,20 @@ class Application:
         forces on its own.
         """
         theme.set_mode(mode)
+        self.window.sidebar.set_theme_label(mode)
         qt = QApplication.instance()
         if qt is None:
             return
         qt.setStyleSheet(stylesheet())
         for widget in qt.allWidgets():
             widget.update()
+
+    def _on_theme_toggle_requested(self) -> None:
+        """Flips the Settings dropdown rather than applying a mode directly, so
+        persistence and every other listener go through the one path a manual
+        dropdown change already uses instead of a second copy of that logic."""
+        target = "light" if theme.mode() == "dark" else "dark"
+        self.settings.theme_mode.setCurrentIndex(self.settings.theme_mode.findData(target))
 
     def _on_recalibrate_from_settings(self) -> None:
         self.controller.recalibrate()

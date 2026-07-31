@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from .. import theme
 from .controller import LiveState
-from .widgets import label
+from .widgets import button, label
 
 S = theme.SPACE
 
@@ -55,6 +55,9 @@ class StatusPip(QWidget):
 
 class Sidebar(QFrame):
     navigated = Signal(str)
+    #: Fired on click; carries no argument because Application, not this widget, owns
+    #: what "the other mode" actually is (theme.mode() is the live source of truth).
+    theme_toggle_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -76,14 +79,14 @@ class Sidebar(QFrame):
         self._group.setExclusive(True)
         self._buttons: dict[str, QPushButton] = {}
         for key, text in SCREENS:
-            button = QPushButton(text)
-            button.setObjectName("NavItem")
-            button.setCheckable(True)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.clicked.connect(lambda _=False, k=key: self.navigated.emit(k))
-            self._group.addButton(button)
-            self._buttons[key] = button
-            layout.addWidget(button)
+            nav_button = QPushButton(text)
+            nav_button.setObjectName("NavItem")
+            nav_button.setCheckable(True)
+            nav_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            nav_button.clicked.connect(lambda _=False, k=key: self.navigated.emit(k))
+            self._group.addButton(nav_button)
+            self._buttons[key] = nav_button
+            layout.addWidget(nav_button)
 
         layout.addStretch(1)
 
@@ -95,7 +98,14 @@ class Sidebar(QFrame):
         self.status_text = label("Starting", "Body")
         footer.addWidget(self.status_text)
         footer.addStretch(1)
+        # Labelled with the mode a click switches *to*, not the current one — matches
+        # how the rest of the instrument reads (a control names the action, not the
+        # state) and means this needs no separate "current mode" indicator.
+        self.theme_toggle = button("Light", "Ghost")
+        self.theme_toggle.clicked.connect(self.theme_toggle_requested)
+        footer.addWidget(self.theme_toggle)
         layout.addLayout(footer)
+        self.set_theme_label(theme.mode())
 
         privacy = label("Runs entirely on this device", "Eyebrow")
         privacy.setContentsMargins(S["lg"], S["md"], S["lg"], 0)
@@ -105,6 +115,9 @@ class Sidebar(QFrame):
     def select(self, key: str) -> None:
         if key in self._buttons:
             self._buttons[key].setChecked(True)
+
+    def set_theme_label(self, mode: str) -> None:
+        self.theme_toggle.setText("Dark" if mode == "light" else "Light")
 
 
 class MainWindow(QWidget):

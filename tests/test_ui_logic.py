@@ -120,6 +120,35 @@ class TestLayoutInvariants:
         assert header.minimumSizeHint().width() < 600
 
 
+class TestSidebarThemeToggle:
+    """The button names the mode a click switches *to*, not the current one."""
+
+    def test_labelled_light_while_dark_is_active(self, qt_app):
+        from postureguard.ui.window import Sidebar
+
+        sidebar = Sidebar()
+        sidebar.set_theme_label("dark")
+        assert sidebar.theme_toggle.text() == "Light"
+
+    def test_labelled_dark_while_light_is_active(self, qt_app):
+        from postureguard.ui.window import Sidebar
+
+        sidebar = Sidebar()
+        sidebar.set_theme_label("light")
+        assert sidebar.theme_toggle.text() == "Dark"
+
+    def test_clicking_it_emits_the_toggle_signal(self, qt_app):
+        from postureguard.ui.window import Sidebar
+
+        sidebar = Sidebar()
+        captured = []
+        sidebar.theme_toggle_requested.connect(lambda: captured.append(True))
+
+        sidebar.theme_toggle.click()
+
+        assert captured == [True]
+
+
 class TestSettingsRoundTrip:
     """_emit rebuilds Config from the visible controls, so any field without a control
     silently reverts to its default. These pin the ones that have no control."""

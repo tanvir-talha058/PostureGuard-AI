@@ -182,6 +182,34 @@ class TestThemeSwitching:
             application.shutdown()
             theme.set_mode("dark")  # process-global state; never leak into other tests
 
+    def test_the_sidebar_toggle_flips_the_mode_and_persists_it(
+        self, qt_app, isolated_home, no_dialogs, monkeypatch
+    ):
+        from postureguard import theme
+
+        rig(monkeypatch, fails_for=frozenset())
+        application = Application(Config(camera_index=0, mini_window=False))
+        try:
+            assert theme.mode() == "dark"
+            assert application.window.sidebar.theme_toggle.text() == "Light"
+
+            application.window.sidebar.theme_toggle.click()
+
+            assert theme.mode() == "light"
+            assert application.config.theme_mode == "light"
+            assert application.window.sidebar.theme_toggle.text() == "Dark"
+            assert application.settings.theme_mode.currentData() == "light"
+            saved = json.loads(paths.config_path().read_text(encoding="utf-8"))
+            assert saved["theme_mode"] == "light"
+
+            application.window.sidebar.theme_toggle.click()
+
+            assert theme.mode() == "dark"
+            assert application.window.sidebar.theme_toggle.text() == "Light"
+        finally:
+            application.shutdown()
+            theme.set_mode("dark")  # process-global state; never leak into other tests
+
 
 class TestMiniWindowRemembersItsMonitor:
     def test_falls_back_to_the_primary_screen_when_the_saved_name_is_unknown(
