@@ -104,7 +104,12 @@ class VideoView(QWidget):
         pen.setWidthF(1.0)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
+        # A flat 0.5 logical-unit inset only centres the stroke on a physical pixel at
+        # dpr=1; at a fractional dpr (this project's own dev display reports 1.5) a
+        # logical half-unit is not half a physical pixel, so the frame goes soft. Same
+        # fix as widgets.crisp(), applied to an inset instead of a single line.
+        inset = 0.5 / self.devicePixelRatioF()
+        painter.drawRect(rect.adjusted(inset, inset, -inset, -inset))
 
     def _note(self, painter: QPainter, rect: QRectF, text: str) -> None:
         painter.setFont(theme.cue_font())
