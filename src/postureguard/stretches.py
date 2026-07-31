@@ -108,6 +108,19 @@ TWENTY_TWENTY_TWENTY = Exercise(
     ),
 )
 
+SEAT_DISTANCE_RESET = Exercise(
+    name="Seat and screen reset",
+    purpose="Corrects the too-far drift that has you leaning forward or squinting to compensate.",
+    seconds=20,
+    targets=FaultKind.SCREEN_TOO_FAR,
+    steps=(
+        "Sit all the way back so your hips touch the back of the chair.",
+        "Scoot the chair in until your forearms rest comfortably on the desk.",
+        "Check that the screen sits about an arm's length away, top at eye level.",
+        "Settle your shoulders down and back before you continue.",
+    ),
+)
+
 STAND_AND_WALK = Exercise(
     name="Stand and walk",
     purpose="The one thing that resets everything at once.",
@@ -168,6 +181,7 @@ ALL_EXERCISES: tuple[Exercise, ...] = (
     LATERAL_NECK,
     SHOULDER_BLADE_SQUEEZE,
     TWENTY_TWENTY_TWENTY,
+    SEAT_DISTANCE_RESET,
     NECK_ROTATION,
     SHOULDER_DROP,
     HIP_FLEXOR,
@@ -195,6 +209,7 @@ _REASONS = {
     FaultKind.FORWARD_HEAD: "Your head has been drifting forward of your shoulders.",
     FaultKind.SPINE_FLEXION: "You have been sinking and rounding through the upper back.",
     FaultKind.SCREEN_TOO_CLOSE: "You have been creeping toward the screen.",
+    FaultKind.SCREEN_TOO_FAR: "You have been sitting well back from the screen.",
     FaultKind.LATERAL_TILT: "You have been leaning onto one side.",
     FaultKind.HEAD_ROTATION: "You have been holding your head turned to one side.",
     FaultKind.SHOULDER_SHRUG: "Your shoulders have been creeping up toward your ears.",

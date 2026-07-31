@@ -38,8 +38,10 @@ def kinds(faults):
 
 # Craning: the gap closes while the face grows.
 CRANING = metrics(head_shoulder_gap=0.333, face_scale=0.367)
-# Chair pushed back: absolutes shrink, ratios hold.
+# Chair pushed back far enough (a 20% drop) to be its own fault, not just a shift.
 FURTHER = metrics(screen_distance=0.072)
+# A small chair-back shift — inside the dead zone, not a fault either direction.
+SLIGHTLY_FURTHER = metrics(screen_distance=0.086)
 # Whole body leaned in: absolutes grow, ratios hold.
 LEANING_IN = metrics(screen_distance=0.126)
 # Collapsed into the chair.
@@ -118,9 +120,17 @@ class TestHysteresis:
 
 
 class TestForwardHeadDisambiguation:
-    def test_moving_the_chair_back_is_not_bad_posture(self):
+    def test_a_small_chair_shift_back_is_not_bad_posture(self):
         engine = RuleEngine(BASELINE, FAST)
-        assert run(engine, FURTHER, 30) == []
+        assert run(engine, SLIGHTLY_FURTHER, 30) == []
+
+    def test_moving_the_chair_back_far_enough_flags_too_far_not_forward_head(self):
+        """A real, sustained retreat is its own fault — not silence, and not forward
+        head, which needs the opposite (closing) gap signal."""
+        engine = RuleEngine(BASELINE, FAST)
+        faults = run(engine, FURTHER, 30)
+        assert FaultKind.SCREEN_TOO_FAR in kinds(faults)
+        assert FaultKind.FORWARD_HEAD not in kinds(faults)
 
     def test_leaning_in_flags_distance_not_forward_head(self):
         """Both signals move, but the ratios do not — so it is distance, not craning."""
@@ -141,6 +151,38 @@ class TestForwardHeadDisambiguation:
         assert FaultKind.FORWARD_HEAD not in kinds(
             run(engine, metrics(face_scale=0.400), 30)
         )
+
+
+class TestScreenTooFar:
+    """The symmetric counterpart to too-close: reused thresholds structure, opposite
+    direction — see rules._screen_too_far."""
+
+    def test_a_sustained_retreat_flags_too_far(self):
+        engine = RuleEngine(BASELINE, FAST)
+        assert FaultKind.SCREEN_TOO_FAR in kinds(run(engine, FURTHER, 30))
+
+    def test_a_small_retreat_stays_quiet(self):
+        engine = RuleEngine(BASELINE, FAST)
+        assert run(engine, SLIGHTLY_FURTHER, 30) == []
+
+    def test_too_far_and_too_close_are_mutually_exclusive(self):
+        engine = RuleEngine(BASELINE, FAST)
+        assert FaultKind.SCREEN_TOO_CLOSE not in kinds(run(engine, FURTHER, 30))
+
+        engine = RuleEngine(BASELINE, FAST)
+        assert FaultKind.SCREEN_TOO_FAR not in kinds(run(engine, LEANING_IN, 30))
+
+    def test_correcting_back_toward_baseline_clears_the_fault(self):
+        engine = RuleEngine(BASELINE, FAST)
+        run(engine, FURTHER, 5)
+        assert FaultKind.SCREEN_TOO_FAR in engine.active
+        run(engine, GOOD, 5)
+        assert engine.active == frozenset()
+
+    def test_slow_drift_further_from_the_screen_is_reported_as_drift(self):
+        further_dict = {**GOOD.as_dict(), "screen_distance": FURTHER.screen_distance}
+        fault = evaluate_drift(BASELINE, further_dict, Thresholds())
+        assert fault is not None and fault.kind == FaultKind.DRIFT
 
 
 class TestOtherFaults:

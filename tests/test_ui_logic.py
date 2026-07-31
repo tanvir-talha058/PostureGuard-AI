@@ -490,6 +490,53 @@ class TestMiniWindow:
         overlay.set_collapsed(False)
         assert overlay.y() + overlay.height() == bottom
 
+    def test_dragging_reports_the_landing_position_once_on_release(self, qt_app):
+        """Exercises the real mousePress/Move/Release handlers, not just the
+        `moved` signal handler on the receiving end — a fast drag with no explicit
+        mouse grab is exactly the kind of thing that silently stops delivering
+        events partway through in other Qt apps."""
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+
+        from postureguard.overlay import PostureOverlay
+
+        overlay = PostureOverlay()
+        overlay.move(50, 50)
+
+        landed = []
+        overlay.moved.connect(lambda x, y: landed.append((x, y)))
+
+        press_local = QPointF(20, 10)
+        press_global = QPointF(overlay.mapToGlobal(press_local.toPoint()))
+        overlay.mousePressEvent(
+            QMouseEvent(
+                QMouseEvent.Type.MouseButtonPress, press_local, press_global,
+                Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+        assert landed == [], "must not report anything until the drag ends"
+
+        new_global = QPoint(int(press_global.x()) + 200, int(press_global.y()) + 150)
+        move_local = QPointF(overlay.mapFromGlobal(new_global))
+        overlay.mouseMoveEvent(
+            QMouseEvent(
+                QMouseEvent.Type.MouseMove, move_local, QPointF(new_global),
+                Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+        overlay.mouseReleaseEvent(
+            QMouseEvent(
+                QMouseEvent.Type.MouseButtonRelease, move_local, QPointF(new_global),
+                Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+
+        assert landed == [(overlay.x(), overlay.y())]
+        assert (overlay.x(), overlay.y()) == (250, 200)
+
     def test_collapse_state_is_reported_once_per_change(self, qt_app):
         from postureguard.overlay import PostureOverlay
 

@@ -407,8 +407,11 @@ class Application:
         self.config.save(paths.config_path())
 
     def _remember_mini_collapsed(self, collapsed: bool) -> None:
+        # No save here: overlay.set_collapsed() always emits `moved` right after
+        # `collapsed_changed` (it repositions to keep the bottom edge anchored), so
+        # _remember_mini_position's save a moment later covers this field too —
+        # saving here as well would just write the same file twice per toggle.
         self.config.mini_collapsed = collapsed
-        self.config.save(paths.config_path())
 
     def set_mini_visible(self, visible: bool) -> None:
         if visible:
@@ -449,6 +452,13 @@ class Application:
             self.toast.present(
                 "Camera reconnected", "Monitoring has resumed.", theme.IN_TOLERANCE
             )
+            # A camera that failed on the very first start() never got the mini
+            # window placed or shown at all (start() gates both on that first
+            # attempt succeeding) — reconnecting is the only signal that a launch
+            # like that gets, so it is also the only chance to catch it up.
+            if self.config.mini_window and not self.mini.isVisible():
+                self._place_mini()
+                self.mini.show()
             return
         self.tray.setToolTip("PostureGuard — camera disconnected")
         self.toast.present(

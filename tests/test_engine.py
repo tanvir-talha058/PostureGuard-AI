@@ -107,10 +107,16 @@ class TestMonitoring:
         assert reading.status == "searching"
         assert reading.faults == []
 
-    def test_moving_the_chair_back_is_not_a_fault(self):
+    def test_a_small_chair_shift_back_is_not_a_fault(self):
+        engine, t = calibrated()
+        reading = drive(engine, build(UPRIGHT.scaled(0.95)), seconds=3.0, start=t)
+        assert reading.status == "in_tolerance"
+
+    def test_moving_the_chair_back_far_enough_flags_too_far(self):
         engine, t = calibrated()
         reading = drive(engine, build(UPRIGHT.scaled(0.8)), seconds=3.0, start=t)
-        assert reading.status == "in_tolerance"
+        assert reading.status == "fault"
+        assert FaultKind.SCREEN_TOO_FAR in {f.kind for f in reading.faults}
 
     def test_every_fault_reading_carries_an_instruction(self):
         engine, t = calibrated()

@@ -155,6 +155,7 @@ class Config:
             forward_head_gap_drop=base.forward_head_gap_drop * scale,
             forward_head_face_rise=base.forward_head_face_rise * scale,
             screen_close_rise=base.screen_close_rise * scale,
+            screen_far_drop=base.screen_far_drop * scale,
             tilt_degrees=base.tilt_degrees * scale,
             torso_degrees=base.torso_degrees * scale,
             sink_units=base.sink_units * scale,

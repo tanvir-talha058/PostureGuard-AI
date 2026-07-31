@@ -44,6 +44,7 @@ class FaultKind(str, Enum):
     FORWARD_HEAD = "forward_head"
     SPINE_FLEXION = "spine_flexion"
     SCREEN_TOO_CLOSE = "screen_too_close"
+    SCREEN_TOO_FAR = "screen_too_far"
     LATERAL_TILT = "lateral_tilt"
     HEAD_ROTATION = "head_rotation"
     SHOULDER_SHRUG = "shoulder_shrug"
@@ -76,6 +77,7 @@ FAULT_TITLES: dict[FaultKind, str] = {
     FaultKind.FORWARD_HEAD: "Forward head",
     FaultKind.SPINE_FLEXION: "Slouching",
     FaultKind.SCREEN_TOO_CLOSE: "Too close to the screen",
+    FaultKind.SCREEN_TOO_FAR: "Too far from the screen",
     FaultKind.LATERAL_TILT: "Leaning to one side",
     FaultKind.HEAD_ROTATION: "Turned to the side",
     FaultKind.SHOULDER_SHRUG: "Shoulders raised",
@@ -86,6 +88,7 @@ _CUES: dict[FaultKind, str] = {
     FaultKind.FORWARD_HEAD: "Pull your chin straight back and stack your ears over your shoulders.",
     FaultKind.SPINE_FLEXION: "Sit tall — lift your chest and stack your ribs over your hips.",
     FaultKind.SCREEN_TOO_CLOSE: "Push back to about an arm's length from the screen.",
+    FaultKind.SCREEN_TOO_FAR: "Come in closer — about an arm's length, not the far edge of it.",
     FaultKind.LATERAL_TILT: "Level out — even your shoulders and bring your head upright.",
     FaultKind.HEAD_ROTATION: "Square your monitor to your seat rather than holding your neck twisted toward it.",
     FaultKind.SHOULDER_SHRUG: "Drop your shoulders away from your ears and let your arms hang.",
@@ -99,6 +102,7 @@ FAULT_ACTIONS: dict[FaultKind, str] = {
     FaultKind.FORWARD_HEAD: "Pull your chin back",
     FaultKind.SPINE_FLEXION: "Sit tall — chest up",
     FaultKind.SCREEN_TOO_CLOSE: "Push back from the screen",
+    FaultKind.SCREEN_TOO_FAR: "Move closer to the screen",
     FaultKind.LATERAL_TILT: "Level your shoulders",
     FaultKind.HEAD_ROTATION: "Face your monitor square-on",
     FaultKind.SHOULDER_SHRUG: "Drop your shoulders",
@@ -109,6 +113,7 @@ _JOINTS: dict[FaultKind, tuple[str, ...]] = {
     FaultKind.FORWARD_HEAD: ("left_ear", "right_ear", "left_shoulder", "right_shoulder"),
     FaultKind.SPINE_FLEXION: ("left_shoulder", "right_shoulder", "left_hip", "right_hip"),
     FaultKind.SCREEN_TOO_CLOSE: ("left_eye", "right_eye", "nose"),
+    FaultKind.SCREEN_TOO_FAR: ("left_eye", "right_eye", "nose"),
     FaultKind.LATERAL_TILT: ("left_shoulder", "right_shoulder", "left_eye", "right_eye"),
     FaultKind.HEAD_ROTATION: ("nose", "left_eye", "right_eye"),
     FaultKind.SHOULDER_SHRUG: ("left_shoulder", "right_shoulder", "left_ear", "right_ear"),
@@ -127,6 +132,8 @@ class Thresholds:
     forward_head_face_rise: float = 0.06
     #: Fraction the inter-ocular distance must grow before "too close".
     screen_close_rise: float = 0.15
+    #: Fraction the inter-ocular distance must shrink before "too far".
+    screen_far_drop: float = 0.15
     #: Degrees of head or shoulder roll away from baseline.
     tilt_degrees: float = 9.0
     #: Degrees of torso lean away from baseline.
@@ -299,9 +306,16 @@ def _spine_flexion(metrics: PostureMetrics, base: Baseline, t: Thresholds) -> fl
 
 
 def _screen_too_close(metrics: PostureMetrics, base: Baseline, t: Thresholds) -> float | None:
-    # Only closer is a problem; sitting further back is not a posture fault.
     return _relative_excess(
         metrics.screen_distance, base.get("screen_distance"), t.screen_close_rise, rising=True
+    )
+
+
+def _screen_too_far(metrics: PostureMetrics, base: Baseline, t: Thresholds) -> float | None:
+    """The other direction: leaning back far enough that legibility, not posture,
+    is what degrades — squinting and craning forward again to compensate."""
+    return _relative_excess(
+        metrics.screen_distance, base.get("screen_distance"), t.screen_far_drop, rising=False
     )
 
 
@@ -345,6 +359,7 @@ _CHECKS = {
     FaultKind.FORWARD_HEAD: _forward_head,
     FaultKind.SPINE_FLEXION: _spine_flexion,
     FaultKind.SCREEN_TOO_CLOSE: _screen_too_close,
+    FaultKind.SCREEN_TOO_FAR: _screen_too_far,
     FaultKind.LATERAL_TILT: _lateral_tilt,
     FaultKind.HEAD_ROTATION: _head_rotation,
     FaultKind.SHOULDER_SHRUG: _shoulder_shrug,
@@ -411,6 +426,7 @@ def evaluate_drift(
         forward_head_gap_drop=thresholds.forward_head_gap_drop * thresholds.drift_scale,
         forward_head_face_rise=thresholds.forward_head_face_rise * thresholds.drift_scale,
         screen_close_rise=thresholds.screen_close_rise * thresholds.drift_scale,
+        screen_far_drop=thresholds.screen_far_drop * thresholds.drift_scale,
         tilt_degrees=thresholds.tilt_degrees * thresholds.drift_scale,
         torso_degrees=thresholds.torso_degrees * thresholds.drift_scale,
         sink_units=thresholds.sink_units * thresholds.drift_scale,

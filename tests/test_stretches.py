@@ -25,6 +25,7 @@ class TestLibrary:
             FaultKind.SPINE_FLEXION,
             FaultKind.LATERAL_TILT,
             FaultKind.SCREEN_TOO_CLOSE,
+            FaultKind.SCREEN_TOO_FAR,
             FaultKind.HEAD_ROTATION,
             FaultKind.SHOULDER_SHRUG,
         ],

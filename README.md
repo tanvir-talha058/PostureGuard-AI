@@ -40,6 +40,7 @@ Recalibrate whenever the camera or your chair moves.
 | Forward head | ear-to-shoulder gap closes **and** face grows, both relative to shoulder width |
 | Slouching | shoulders sink in frame, or the torso vector tilts when hips are visible |
 | Too close to the screen | inter-ocular distance grows in absolute terms |
+| Too far from the screen | inter-ocular distance shrinks in absolute terms |
 | Leaning to one side | eye line or shoulder line rolls away from your baseline |
 | Turned to the side | the nose drifts off the eye midline — a sustained turn toward a side monitor |
 | Shoulders raised | ear-to-shoulder gap closes **without** the face growing — the shoulders lifting, not the head craning in |

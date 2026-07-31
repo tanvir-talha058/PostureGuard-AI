@@ -237,6 +237,69 @@ class TestMiniWindowRemembersItsMonitor:
         finally:
             application.shutdown()
 
+    def test_a_dragged_position_survives_a_full_restart(
+        self, qt_app, isolated_home, no_dialogs, monkeypatch
+    ):
+        """The drag itself was already covered (test_ui_logic.py exercises the real
+        mouse handlers); this is the other half — that what gets saved is actually
+        what a fresh launch reads back, not just the screen name."""
+        rig(monkeypatch, fails_for=frozenset())
+        application = Application(Config(camera_index=0, mini_window=True))
+        try:
+            application._remember_mini_position(137, 241)
+            on_disk = json.loads(paths.config_path().read_text(encoding="utf-8"))
+            assert (on_disk["mini_x"], on_disk["mini_y"]) == (137, 241)
+        finally:
+            application.shutdown()
+
+        reloaded = Config.load(paths.config_path())
+        assert (reloaded.mini_x, reloaded.mini_y) == (137, 241)
+
+        restarted = Application(reloaded)
+        try:
+            restarted.start()
+            assert (restarted.mini.x(), restarted.mini.y()) == (137, 241)
+        finally:
+            restarted.shutdown()
+
+    def test_collapsing_writes_the_config_file_only_once(
+        self, qt_app, isolated_home, no_dialogs, monkeypatch
+    ):
+        """collapsed_changed and moved both fire from the same overlay.set_collapsed()
+        call; each used to trigger its own immediate config.save()."""
+        rig(monkeypatch, fails_for=frozenset())
+        application = Application(Config(camera_index=0, mini_window=True))
+        try:
+            saves = []
+            original_save = Config.save
+            monkeypatch.setattr(
+                Config, "save", lambda self, path: (saves.append(1), original_save(self, path))[1]
+            )
+            application.mini.set_collapsed(True)
+            assert len(saves) == 1
+            assert application.config.mini_collapsed is True
+        finally:
+            application.shutdown()
+
+    def test_reconnecting_places_the_mini_window_if_it_never_came_up(
+        self, qt_app, isolated_home, no_dialogs, monkeypatch
+    ):
+        """A camera that fails on the very first start() means start() never places
+        or shows the mini window at all — reconnecting is the only later signal that
+        gets a chance to catch it up."""
+        rig(monkeypatch, fails_for=0, cameras=[CameraInfo(0, "Test Camera")])
+        application = Application(Config(camera_index=0, mini_window=True))
+        try:
+            application.start()
+            assert not application.controller.running
+            assert not application.mini.isVisible()
+
+            application._on_camera_health(True)
+
+            assert application.mini.isVisible()
+        finally:
+            application.shutdown()
+
 
 class TestFixingTheCameraFromSettingsAfterAFailedStart:
     """Distinct from the self-heal above: this is the user manually picking a
