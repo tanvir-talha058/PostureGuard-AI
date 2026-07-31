@@ -92,6 +92,11 @@ class Config:
     #: office desk and a home desk keep two calibrations rather than recalibrating
     #: twice a day. "default" always exists; others are created from Settings.
     calibration_profile: str = "default"
+    #: Switch `calibration_profile` automatically when the set of connected monitors
+    #: matches one remembered from Settings. Off by default — it changes what gets
+    #: measured against without the user asking in the moment, so it opts in rather
+    #: than assuming every profile split is monitor-driven.
+    auto_profile_by_monitor: bool = False
 
     # --- posture: standing ---
     #: A sitting baseline does not apply to a standing posture — the whole frame

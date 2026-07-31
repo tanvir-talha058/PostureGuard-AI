@@ -5,12 +5,24 @@ from __future__ import annotations
 from datetime import datetime
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QInputDialog
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QInputDialog
 
 from .... import paths
 from ....calibration import Baseline
 from ....metrics import describe
+from ....monitor_profile import MonitorProfiles, fingerprint
 from ...widgets import Card, button, label, plain
+from .rows import Row
+
+
+def _current_arrangement() -> str:
+    """A fingerprint of whatever monitors are connected right now."""
+    screens = [
+        (screen.name(), screen.size().width(), screen.size().height())
+        for screen in QGuiApplication.screens()
+    ]
+    return fingerprint(screens)
 
 
 def _when(stamp: str) -> str:
@@ -41,13 +53,19 @@ class CalibrationPanel(Card):
     changed = Signal()
     recalibrate_requested = Signal()
 
-    def __init__(self, calibration_profile: str) -> None:
+    def __init__(
+        self,
+        calibration_profile: str,
+        auto_profile_by_monitor: bool = False,
+        monitor_profiles: MonitorProfiles | None = None,
+    ) -> None:
         super().__init__(
             "Calibration",
             "Your baseline is what every threshold is measured against. "
             "Recapture it whenever the camera or your chair moves.",
         )
         self._default_profile = calibration_profile
+        self.monitor_profiles = monitor_profiles if monitor_profiles is not None else MonitorProfiles()
 
         self.add(label("Profile", "Eyebrow"))
         self.profile = QComboBox()
@@ -69,6 +87,26 @@ class CalibrationPanel(Card):
         row.addStretch(1)
         self.add(plain(row))
 
+        self.auto_by_monitor = QCheckBox("Enabled")
+        self.auto_by_monitor.setChecked(auto_profile_by_monitor)
+        self.add(
+            Row(
+                "Auto-switch by monitor setup",
+                "Switch profiles on its own when it recognizes the connected "
+                "monitors — remember a setup below, once per profile.",
+                self.auto_by_monitor,
+            )
+        )
+        remember = button("Remember this setup…", "Ghost")
+        remember.clicked.connect(self._remember_current_setup)
+        remember_row = QHBoxLayout()
+        remember_row.addWidget(remember)
+        remember_row.addStretch(1)
+        self.add(plain(remember_row))
+        self._monitor_note = label("", "Eyebrow")
+        self.add(self._monitor_note)
+
+        self.auto_by_monitor.toggled.connect(self.changed)
         self.profile.currentTextChanged.connect(self._on_profile_changed)
         self.refresh()
 
@@ -100,6 +138,13 @@ class CalibrationPanel(Card):
     def _on_profile_changed(self) -> None:
         self.refresh()
         self.changed.emit()
+
+    def _remember_current_setup(self) -> None:
+        """Associate the monitors connected right now with the selected profile."""
+        key = _current_arrangement()
+        self.monitor_profiles.remember(key, self.profile.currentText())
+        self.monitor_profiles.save(paths.monitor_profiles_path())
+        self._monitor_note.setText(f'Remembered this monitor setup for "{self.profile.currentText()}".')
 
     def refresh(self) -> None:
         active_profile = self.profile.currentText() or self._default_profile

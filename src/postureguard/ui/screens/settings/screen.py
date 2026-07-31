@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
 
 from .... import theme
 from ....config import Config
+from ....monitor_profile import MonitorProfiles
 from ....session import SessionStore
 from ...widgets import PageHeader
 from .breaks import BreaksPanel
@@ -31,7 +32,11 @@ class SettingsScreen(QWidget):
     recalibrate_requested = Signal()
 
     def __init__(
-        self, config: Config, cameras: list | None = None, store: SessionStore | None = None
+        self,
+        config: Config,
+        cameras: list | None = None,
+        store: SessionStore | None = None,
+        monitor_profiles: MonitorProfiles | None = None,
     ) -> None:
         super().__init__()
         self.config = config
@@ -57,7 +62,9 @@ class SettingsScreen(QWidget):
         scroll.setWidget(host)
         outer.addWidget(scroll, 1)
 
-        self.calibration = CalibrationPanel(config.calibration_profile)
+        self.calibration = CalibrationPanel(
+            config.calibration_profile, config.auto_profile_by_monitor, monitor_profiles
+        )
         self.calibration.recalibrate_requested.connect(self.recalibrate_requested)
         self.calibration.changed.connect(self._emit)
         layout.addWidget(self.calibration)
@@ -151,6 +158,7 @@ class SettingsScreen(QWidget):
             mini_y=self.config.mini_y,
             mini_screen=self.config.mini_screen,
             calibration_profile=self.profile.currentText() or self.config.calibration_profile,
+            auto_profile_by_monitor=self.calibration.auto_by_monitor.isChecked(),
             theme_mode=self.appearance.theme_mode.currentData() or "dark",
         )
         self.changed.emit(self.config)

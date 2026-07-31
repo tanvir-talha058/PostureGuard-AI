@@ -239,3 +239,56 @@ class TestFixingTheCameraFromSettingsAfterAFailedStart:
             assert application.config.camera_index == 0
         finally:
             application.shutdown()
+
+
+class TestAutoSwitchByMonitorSetup:
+    """The remembered-arrangement -> profile mapping is looked up before the very
+    first controller.start(), mirroring how the camera self-heal above also runs
+    before start() so the first camera open already uses the corrected value."""
+
+    def test_a_remembered_arrangement_switches_profile_before_first_start(
+        self, qt_app, isolated_home, no_dialogs, monkeypatch
+    ):
+        from postureguard import app as app_module
+        from postureguard.monitor_profile import MonitorProfiles
+
+        rig(monkeypatch, fails_for=frozenset())
+        monkeypatch.setattr(app_module, "fingerprint", lambda screens: "fixed-key")
+
+        baselines_dir = isolated_home / "baselines"
+        baselines_dir.mkdir(parents=True, exist_ok=True)
+        (baselines_dir / "standing.json").write_text(
+            json.dumps({"values": {}, "sample_count": 1, "captured_at": "2024-01-01T00:00:00+00:00"}),
+            encoding="utf-8",
+        )
+        profiles = MonitorProfiles()
+        profiles.remember("fixed-key", "standing")
+        profiles.save(isolated_home / "monitor_profiles.json")
+
+        application = Application(
+            Config(camera_index=0, mini_window=False, auto_profile_by_monitor=True)
+        )
+        try:
+            assert application.settings.profile.currentText() == "standing"
+            assert application.config.calibration_profile == "standing"
+        finally:
+            application.shutdown()
+
+    def test_disabled_by_default_even_with_a_matching_remembered_arrangement(
+        self, qt_app, isolated_home, no_dialogs, monkeypatch
+    ):
+        from postureguard import app as app_module
+        from postureguard.monitor_profile import MonitorProfiles
+
+        rig(monkeypatch, fails_for=frozenset())
+        monkeypatch.setattr(app_module, "fingerprint", lambda screens: "fixed-key")
+
+        profiles = MonitorProfiles()
+        profiles.remember("fixed-key", "standing")
+        profiles.save(isolated_home / "monitor_profiles.json")
+
+        application = Application(Config(camera_index=0, mini_window=False))
+        try:
+            assert application.config.calibration_profile == "default"
+        finally:
+            application.shutdown()

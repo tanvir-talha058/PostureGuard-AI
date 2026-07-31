@@ -15,6 +15,7 @@ from .alerts import DimOverlay, Toast, app_icon
 from .capture import available_cameras
 from .config import Config
 from .hotkeys import GlobalHotkeys
+from .monitor_profile import MonitorProfiles, fingerprint
 from .overlay import PostureOverlay, ViewModel
 from .session import SessionStore
 from .ui.controller import MonitorController
@@ -54,10 +55,13 @@ class Application:
         self.live = LiveScreen(config.thresholds(), self.store)
         self.history = HistoryScreen(self.store)
         self.exercises = ExercisesScreen(self.store)
+        self._monitor_profiles = MonitorProfiles.load(paths.monitor_profiles_path())
         # Real devices, by name. The picker used to offer a fixed "Camera 0/1/2" whether
         # or not those existed, so selecting one could tear down a working camera to
         # open nothing.
-        self.settings = SettingsScreen(config, available_cameras(), self.store)
+        self.settings = SettingsScreen(
+            config, available_cameras(), self.store, self._monitor_profiles
+        )
 
         self.window.add_screen("live", self.live)
         self.window.add_screen("history", self.history)
@@ -79,6 +83,11 @@ class Application:
             # happens later, from main()), so the very first camera open attempt
             # uses the corrected index.
             self.settings._emit()
+
+        # Same reasoning as the camera correction above: runs before controller.start()
+        # so the very first camera open already uses the right profile's baseline,
+        # rather than starting on "default" and switching a moment later.
+        self._maybe_auto_switch_profile()
 
         # Reconciled once at startup, not just on a settings change: the launch
         # command embeds this executable's own path, which can drift after an
@@ -133,6 +142,13 @@ class Application:
 
         self.settings.changed.connect(self._on_config_changed)
         self.settings.recalibrate_requested.connect(self._on_recalibrate_from_settings)
+
+        # A dock/undock changes the connected monitors without restarting the app —
+        # the startup check alone would miss that.
+        qt = QApplication.instance()
+        if qt is not None:
+            qt.screenAdded.connect(self._maybe_auto_switch_profile)
+            qt.screenRemoved.connect(self._maybe_auto_switch_profile)
 
         # Closing the window hides it; monitoring continues from the tray. Tearing the
         # camera down here would silently stop the thing the user installed the app
@@ -272,6 +288,30 @@ class Application:
     def _on_recalibrate_from_settings(self) -> None:
         self.controller.recalibrate()
         self.window.show_screen("live")
+
+    def _maybe_auto_switch_profile(self, *_args) -> None:
+        """Switch calibration_profile if the connected monitors match a remembered setup.
+
+        Goes through the profile combo rather than building a Config directly, so
+        this reuses the exact pathway a manual switch in Settings already goes
+        through (CalibrationPanel picks up the change, persistence and the
+        controller reload happen via the usual `changed` -> `_on_config_changed`
+        route) instead of a second, easily-diverging copy of that logic.
+        """
+        if not self.config.auto_profile_by_monitor:
+            return
+        screens = [
+            (screen.name(), screen.size().width(), screen.size().height())
+            for screen in QApplication.screens()
+        ]
+        target = self._monitor_profiles.get(fingerprint(screens))
+        if target is None or target == self.settings.profile.currentText():
+            return
+        index = self.settings.profile.findText(target)
+        if index < 0:
+            # Remembered for a profile that no longer has a saved baseline.
+            return
+        self.settings.profile.setCurrentIndex(index)
 
     def _maybe_show_weekly_summary(self) -> None:
         if not self.config.weekly_summary_enabled:

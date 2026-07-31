@@ -93,3 +93,7 @@ def snooze_backoff_path() -> Path:
 
 def weekly_summary_path() -> Path:
     return data_dir() / "weekly_summary.json"
+
+
+def monitor_profiles_path() -> Path:
+    return data_dir() / "monitor_profiles.json"

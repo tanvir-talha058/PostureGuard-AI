@@ -192,6 +192,42 @@ class TestPowerSettings:
         assert screen.pause_after_idle._readout.text() == "Never"
 
 
+class TestMonitorProfileSettings:
+    def test_the_auto_switch_checkbox_reflects_the_starting_config(self, qt_app):
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings import SettingsScreen
+
+        screen = SettingsScreen(Config(auto_profile_by_monitor=True))
+        assert screen.calibration.auto_by_monitor.isChecked() is True
+
+    def test_toggling_it_emits_the_new_value(self, qt_app):
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings import SettingsScreen
+
+        screen = SettingsScreen(Config(auto_profile_by_monitor=False))
+        captured = []
+        screen.changed.connect(captured.append)
+
+        screen.calibration.auto_by_monitor.setChecked(True)
+
+        assert captured[-1].auto_profile_by_monitor is True
+
+    def test_remembering_a_setup_persists_it_against_the_selected_profile(self, qt_app, tmp_path, monkeypatch):
+        from postureguard import paths
+        from postureguard.config import Config
+        from postureguard.monitor_profile import MonitorProfiles
+        from postureguard.ui.screens.settings import SettingsScreen
+        from postureguard.ui.screens.settings.calibration import _current_arrangement
+
+        monkeypatch.setattr(paths, "monitor_profiles_path", lambda: tmp_path / "monitor_profiles.json")
+        screen = SettingsScreen(Config(), monitor_profiles=MonitorProfiles())
+
+        screen.calibration._remember_current_setup()
+
+        reloaded = MonitorProfiles.load(paths.monitor_profiles_path())
+        assert reloaded.get(_current_arrangement()) == "default"
+
+
 class TestCameraPicker:
     def _screen(self, cameras, **config_kwargs):
         from postureguard.config import Config
