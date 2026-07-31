@@ -642,7 +642,7 @@ class SettingsScreen(QWidget):
         """Reflect a sensitivity change made outside this screen — the automatic
         backoff after repeated snoozes — without re-emitting `changed` for it."""
         self._loading = True
-        self.sensitivity.slider.setValue(int(round(value * 100)))
+        self.sensitivity.slider.setValue(round(value * 100))
         self._loading = False
 
     def refresh(self) -> None:

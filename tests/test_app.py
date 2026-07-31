@@ -20,12 +20,12 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox
 
-from postureguard import paths  # noqa: E402
-from postureguard.app import Application  # noqa: E402
-from postureguard.capture import CameraError, CameraInfo  # noqa: E402
-from postureguard.config import Config  # noqa: E402
+from postureguard import paths
+from postureguard.app import Application
+from postureguard.capture import CameraError, CameraInfo
+from postureguard.config import Config
 
 
 @pytest.fixture(scope="module")
@@ -188,7 +188,9 @@ class TestMiniWindowRemembersItsMonitor:
         self, qt_app, isolated_home, no_dialogs, monkeypatch
     ):
         rig(monkeypatch, fails_for=frozenset())
-        application = Application(Config(camera_index=0, mini_window=False, mini_screen="a monitor that unplugged itself"))
+        application = Application(
+            Config(camera_index=0, mini_window=False, mini_screen="a monitor that unplugged itself")
+        )
         try:
             assert application._resolve_mini_screen() is QApplication.primaryScreen()
         finally:

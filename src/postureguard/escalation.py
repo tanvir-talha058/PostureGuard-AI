@@ -16,9 +16,9 @@ again within a few seconds is one lapse, not two, and must not produce two toast
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Sequence
 
 from .rules import Fault, FaultKind
 

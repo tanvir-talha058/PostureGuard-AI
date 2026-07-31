@@ -20,10 +20,10 @@ import json
 import statistics
 import time
 from collections import deque
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Mapping
 
 from .metrics import PostureMetrics
 
@@ -64,7 +64,7 @@ class Baseline:
         path.write_text(self.to_json(), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: Path) -> "Baseline | None":
+    def load(cls, path: Path) -> Baseline | None:
         """Return the stored baseline, or None if absent or unreadable.
 
         A corrupt file should send the user back through calibration, not crash the

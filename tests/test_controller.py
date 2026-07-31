@@ -11,12 +11,12 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication
 
-from postureguard.config import Config  # noqa: E402
-from postureguard.engine import Engine  # noqa: E402
-from postureguard.session import SessionStore  # noqa: E402
-from postureguard.ui.controller import MonitorController  # noqa: E402
+from postureguard.config import Config
+from postureguard.engine import Engine
+from postureguard.session import SessionStore
+from postureguard.ui.controller import MonitorController
 
 
 @pytest.fixture(scope="module")
@@ -372,8 +372,8 @@ class TestRecoveryFromAFailedStart:
     camera-change path only ran if the controller had already been running once."""
 
     def _rig(self, monkeypatch, *, fails_for):
-        from postureguard.ui import controller as controller_module
         from postureguard.capture import CameraError
+        from postureguard.ui import controller as controller_module
 
         failing = {fails_for} if isinstance(fails_for, int) else set(fails_for)
         attempts = []

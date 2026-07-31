@@ -1,11 +1,10 @@
 import math
 
 import pytest
+from fixtures import ASPECT, FURTHER_AWAY, SLUMPED, UPRIGHT, Pose, build
 
 from postureguard.landmarks import Landmarks, Point
 from postureguard.metrics import compute_metrics
-
-from fixtures import ASPECT, FURTHER_AWAY, SLUMPED, UPRIGHT, Pose, build
 
 
 def m(pose: Pose):

@@ -10,7 +10,7 @@ from ... import render, theme
 from ...rules import FaultKind, Thresholds
 from ...session import SessionStore
 from ..controller import LiveState
-from ..widgets import Card, StatTile, PageHeader, button, eyebrow, label, plain
+from ..widgets import Card, PageHeader, StatTile, button, eyebrow, label, plain
 
 S = theme.SPACE
 

@@ -1,4 +1,3 @@
-import pytest
 
 from postureguard.calibration import baseline_from
 from postureguard.metrics import PostureMetrics

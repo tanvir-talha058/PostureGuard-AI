@@ -18,7 +18,7 @@ RANGES = ((7, "7 days"), (14, "14 days"), (30, "30 days"))
 def _duration(seconds: int) -> str:
     if seconds < 60:
         return f"{seconds}s"
-    minutes, remainder = divmod(seconds, 60)
+    minutes, _ = divmod(seconds, 60)
     if minutes < 60:
         return f"{minutes}m"
     hours, minutes = divmod(minutes, 60)

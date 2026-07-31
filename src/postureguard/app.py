@@ -6,7 +6,7 @@ import argparse
 import logging
 import sys
 
-from PySide6.QtCore import QAbstractEventDispatcher, QTimer, Qt
+from PySide6.QtCore import QAbstractEventDispatcher, Qt, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
@@ -15,8 +15,8 @@ from .alerts import DimOverlay, Toast, app_icon
 from .capture import available_cameras
 from .config import Config
 from .hotkeys import GlobalHotkeys
-from .session import SessionStore
 from .overlay import PostureOverlay, ViewModel
+from .session import SessionStore
 from .ui.controller import MonitorController
 from .ui.design import stylesheet
 from .ui.screens.exercises import ExercisesScreen

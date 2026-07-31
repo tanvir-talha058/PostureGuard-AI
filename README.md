@@ -136,7 +136,7 @@ they are unit-tested against synthetic poses. Everything else is verified by run
 ## Development
 
 ```bash
-.venv/Scripts/python -m pytest          # 172 tests
+.venv/Scripts/python -m pytest          # 391 tests
 python tools/preview_app.py             # render every screen with seeded data
 python tools/preview_overlay.py         # render the compact overlay states
 ```

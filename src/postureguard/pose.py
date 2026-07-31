@@ -151,7 +151,7 @@ class PoseTracker:
     def close(self) -> None:
         self._landmarker.close()
 
-    def __enter__(self) -> "PoseTracker":
+    def __enter__(self) -> PoseTracker:
         return self
 
     def __exit__(self, *exc_info: object) -> None:

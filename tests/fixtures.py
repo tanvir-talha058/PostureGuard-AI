@@ -32,7 +32,7 @@ class Pose:
     shoulder_tilt_deg: float = 0.0
     hip_visibility: float = 1.0
 
-    def scaled(self, factor: float) -> "Pose":
+    def scaled(self, factor: float) -> Pose:
         """The same posture, further from or closer to the camera.
 
         Every length shrinks together and no ratio changes — which is exactly the

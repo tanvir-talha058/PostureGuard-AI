@@ -164,7 +164,7 @@ class Config:
         path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: Path) -> "Config":
+    def load(cls, path: Path) -> Config:
         """Read stored settings, falling back to defaults for anything unreadable.
 
         Settings are never load-bearing enough to justify failing startup, and an

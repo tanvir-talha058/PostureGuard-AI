@@ -59,7 +59,7 @@ class SnoozeBackoff:
         return {"day": self.day, "count": self.count}
 
     @classmethod
-    def restore(cls, state: dict) -> "SnoozeBackoff":
+    def restore(cls, state: dict) -> SnoozeBackoff:
         day = state.get("day")
         count = state.get("count")
         if not isinstance(day, str) or not isinstance(count, int):
@@ -71,7 +71,7 @@ class SnoozeBackoff:
         path.write_text(json.dumps(self.to_state()), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: Path) -> "SnoozeBackoff":
+    def load(cls, path: Path) -> SnoozeBackoff:
         try:
             state = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):

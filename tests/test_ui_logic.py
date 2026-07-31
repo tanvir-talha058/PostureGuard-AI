@@ -11,11 +11,11 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication
 
-from postureguard import theme  # noqa: E402
-from postureguard.ui.charts import Bar, ColumnChart, RankedBarChart, score_color  # noqa: E402
-from postureguard.ui.widgets import Card, PageHeader, StatTile, label  # noqa: E402
+from postureguard import theme
+from postureguard.ui.charts import Bar, ColumnChart, RankedBarChart, score_color
+from postureguard.ui.widgets import Card, PageHeader, StatTile, label
 
 
 @pytest.fixture(scope="module")
@@ -283,7 +283,11 @@ class TestMiniWindowHasNoCamera:
     def test_the_expanded_panel_is_shorter_without_a_video_section(self, qt_app):
         from postureguard import theme
         from postureguard.overlay import (
-            COLLAPSED_HEIGHT, FAULT_HEIGHT, HEADER_HEIGHT, READINGS_HEIGHT, PostureOverlay,
+            COLLAPSED_HEIGHT,
+            FAULT_HEIGHT,
+            HEADER_HEIGHT,
+            READINGS_HEIGHT,
+            PostureOverlay,
         )
 
         overlay = PostureOverlay()
@@ -449,7 +453,7 @@ class TestMiniWindow:
 
     def test_the_short_action_shares_a_verb_with_the_full_cue(self, qt_app):
         """Bar and panel must read as one instruction, not two different ones."""
-        from postureguard.rules import FAULT_ACTIONS, _CUES, FaultKind
+        from postureguard.rules import _CUES, FAULT_ACTIONS, FaultKind
 
         for kind in (FaultKind.FORWARD_HEAD, FaultKind.SPINE_FLEXION, FaultKind.LATERAL_TILT):
             verb = FAULT_ACTIONS[kind].split()[0].lower().strip("—")
@@ -498,7 +502,7 @@ class TestCrispPixelSnapping:
     def test_the_naive_flat_offset_would_have_missed_at_this_projects_own_dpr(self):
         """Proves the bug this fix addresses, not just the fix's own arithmetic:
         the pre-fix formula fails the same boundary check at dpr=1.5."""
-        naive = round(7) + 0.5
+        naive = (7) + 0.5
         assert not self._lands_on_a_physical_pixel_boundary(naive, 1.5)
 
     def test_dpr_one_is_a_no_op_change_from_the_previous_implementation(self):

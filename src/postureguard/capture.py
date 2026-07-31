@@ -68,7 +68,7 @@ def available_cameras() -> list[CameraInfo]:
                 CameraInfo(index, device.description() or f"Camera {index}")
                 for index, device in enumerate(inputs)
             ]
-    except Exception:  # noqa: BLE001 - Qt multimedia is optional at runtime
+    except Exception:
         log.debug("Qt device enumeration unavailable; probing indices instead")
 
     # Fallback: actually open each index and see what answers. Slow, so it is only
@@ -113,7 +113,7 @@ class Camera:
         self._last_reconnect = 0.0
         self._paused = threading.Event()
 
-    def start(self) -> "Camera":
+    def start(self) -> Camera:
         if self._thread is not None:
             return self
 
@@ -291,7 +291,7 @@ class Camera:
         with self._lock:
             self._frame = None
 
-    def __enter__(self) -> "Camera":
+    def __enter__(self) -> Camera:
         return self.start()
 
     def __exit__(self, *exc_info: object) -> None:

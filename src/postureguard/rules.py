@@ -21,9 +21,9 @@ well below where it entered. Without both, the user gets a strobe light at the t
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Mapping
 
 from .calibration import Baseline
 from .metrics import PostureMetrics

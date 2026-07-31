@@ -16,10 +16,10 @@ import csv
 import sqlite3
 import time
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Sequence
 
 from .rules import Fault, FaultKind
 
@@ -274,7 +274,7 @@ class SessionStore:
     def close(self) -> None:
         self._db.close()
 
-    def __enter__(self) -> "SessionStore":
+    def __enter__(self) -> SessionStore:
         return self
 
     def __exit__(self, *exc_info: object) -> None:

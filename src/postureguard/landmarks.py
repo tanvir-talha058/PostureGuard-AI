@@ -11,8 +11,8 @@ ratio first (see :func:`postureguard.metrics.to_square_units`).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 # Landmarks we care about, mapped to their MediaPipe Pose index. "left" and "right"
 # are the subject's own, not the viewer's — so on an unmirrored frame the subject's

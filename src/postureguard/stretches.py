@@ -261,7 +261,7 @@ class BreakTimer:
         interval_minutes: float,
         enabled: bool,
         now_wall: float | None = None,
-    ) -> "BreakTimer":
+    ) -> BreakTimer:
         timer = cls(interval_minutes, enabled)
         saved_at = state.get("saved_at")
         worked = state.get("worked_seconds")
@@ -280,7 +280,7 @@ class BreakTimer:
     @classmethod
     def load_restored(
         cls, path: Path, interval_minutes: float, enabled: bool
-    ) -> "BreakTimer":
+    ) -> BreakTimer:
         """The usual construction path: pick up where a previous run left off,
         unless it left off long enough ago that doing so would be misleading."""
         try:

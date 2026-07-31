@@ -1,10 +1,9 @@
 import pytest
+from fixtures import ASPECT, SLUMPED, UPRIGHT, Pose, build
 
 from postureguard.engine import Engine, Phase
 from postureguard.landmarks import Landmarks
 from postureguard.rules import FaultKind, Thresholds
-
-from fixtures import ASPECT, SLUMPED, UPRIGHT, Pose, build
 
 FAST = Thresholds(enter_seconds=3 / 30, exit_seconds=2 / 30)
 EMPTY = Landmarks({})

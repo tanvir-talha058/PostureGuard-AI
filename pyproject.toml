@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.16"]
 
 [project.scripts]
 postureguard = "postureguard.app:main"
@@ -26,3 +26,16 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "RUF"]
+ignore = [
+    "RUF001",  # the "x" in "1.5x" is a deliberate typographic multiplication sign, not a typo
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B008"]  # fixture defaults use frozen dataclasses, not mutable state

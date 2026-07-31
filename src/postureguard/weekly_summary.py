@@ -50,7 +50,7 @@ class WeeklySummaryGate:
         return {"last_shown": self.last_shown}
 
     @classmethod
-    def restore(cls, state: dict) -> "WeeklySummaryGate":
+    def restore(cls, state: dict) -> WeeklySummaryGate:
         value = state.get("last_shown")
         return cls(last_shown=value if isinstance(value, str) else "")
 
@@ -59,7 +59,7 @@ class WeeklySummaryGate:
         path.write_text(json.dumps(self.to_state()), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: Path) -> "WeeklySummaryGate":
+    def load(cls, path: Path) -> WeeklySummaryGate:
         try:
             state = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
