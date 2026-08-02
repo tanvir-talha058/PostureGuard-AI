@@ -104,3 +104,18 @@ class TestPersistence:
         path = tmp_path / "config.json"
         path.write_text("[1, 2, 3]", encoding="utf-8")
         assert Config.load(path) == Config()
+
+    def test_ai_fields_default_off(self):
+        config = Config()
+        assert config.ai_api_key == ""
+        assert config.ai_weekly_summary_enabled is False
+        assert config.ai_insights_enabled is False
+        assert config.ai_cue_variants_enabled is False
+        assert config.ai_exercise_context_enabled is False
+
+    def test_an_old_config_file_without_ai_keys_loads_ai_defaults(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text('{"sensitivity": 1.4}', encoding="utf-8")
+        loaded = Config.load(path)
+        assert loaded.ai_api_key == ""
+        assert loaded.ai_weekly_summary_enabled is False
