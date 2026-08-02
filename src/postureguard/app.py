@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import autostart, paths, sound, theme
 from .ai import weekly_summary as ai_weekly_summary
+from .ai.cue_variants import pick as pick_cue_variant
 from .ai.worker import AskWorker
 from .alerts import DimOverlay, Toast, app_icon
 from .capture import available_cameras
@@ -380,6 +381,14 @@ class Application:
     def _update_mini(self, state) -> None:
         if not self.mini.isVisible():
             return
+        fault = state.reading.faults[0] if state.reading.faults else None
+        cue_text = ""
+        action_text = ""
+        if fault is not None and self.config.ai_cue_variants_enabled:
+            cue_text = pick_cue_variant(self.controller.cue_variants, fault.kind, fault.cue)
+            action_text = pick_cue_variant(
+                self.controller.cue_variants, fault.kind, fault.action, field="action"
+            )
         self.mini.show_model(
             ViewModel(
                 metrics=state.reading.metrics,
@@ -388,6 +397,8 @@ class Application:
                 message=state.reading.message,
                 urgency=int(state.intervention.level),
                 held_seconds=state.intervention.held_seconds,
+                cue_text=cue_text,
+                action_text=action_text,
             )
         )
 
