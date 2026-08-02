@@ -50,6 +50,9 @@ def ask(
             output_config=output_config,
             messages=[{"role": "user", "content": user_content}],
         )
+        if response.stop_reason == "refusal":
+            return None
+        return next((block.text for block in response.content if block.type == "text"), None)
     except anthropic.AnthropicError as exc:
         log.info("AI request failed: %s", exc)
         return None
@@ -57,7 +60,3 @@ def ask(
         # propagate into the Qt event loop or a background worker thread.
         log.info("AI request failed unexpectedly: %s", exc)
         return None
-
-    if response.stop_reason == "refusal":
-        return None
-    return next((block.text for block in response.content if block.type == "text"), None)
