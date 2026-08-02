@@ -95,6 +95,12 @@ _CUES: dict[FaultKind, str] = {
     FaultKind.DRIFT: "You've been slowly sinking. Reset: feet flat, hips back, chest up.",
 }
 
+#: Public alias of the canonical cue text, for callers outside this module that need
+#: to read (never fire on) the correction strings — e.g. generating alternate
+#: phrasings. The rules engine itself always uses `_CUES` directly; this exists so
+#: that need doesn't require importing a private name.
+FAULT_CUES: dict[FaultKind, str] = _CUES
+
 # The same correction, short enough to read at a glance rather than to sit and parse.
 # The collapsed bar shows only this; the full cue above is for the panel and the toast,
 # where there is room to explain. Same verb in both, so they read as one instruction.
