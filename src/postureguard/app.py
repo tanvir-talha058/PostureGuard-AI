@@ -11,6 +11,8 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import autostart, paths, sound, theme
+from .ai import weekly_summary as ai_weekly_summary
+from .ai.worker import AskWorker
 from .alerts import DimOverlay, Toast, app_icon
 from .capture import available_cameras
 from .config import Config
@@ -334,9 +336,30 @@ class Application:
             return
         if not self.weekly_summary.due():
             return
-        message = build_message(self.store)
         self.weekly_summary.mark_shown()
         self.weekly_summary.save_state(paths.weekly_summary_path())
+
+        if self.config.ai_weekly_summary_enabled and self.config.ai_api_key:
+            payload = ai_weekly_summary.build_stats_payload(self.store)
+            if payload is not None:
+                api_key = self.config.ai_api_key
+                self._weekly_summary_worker = AskWorker(
+                    lambda: ai_weekly_summary.generate_message(payload, api_key)
+                )
+                self._weekly_summary_worker.finished_with.connect(
+                    self._on_weekly_summary_ready
+                )
+                self._weekly_summary_worker.start()
+                return
+
+        self._show_weekly_summary(build_message(self.store))
+
+    def _on_weekly_summary_ready(self, message: str | None) -> None:
+        # A None from the AI path (no network, refusal, timeout) falls back to the
+        # same static one-liner every other launch already uses.
+        self._show_weekly_summary(message if message is not None else build_message(self.store))
+
+    def _show_weekly_summary(self, message: str | None) -> None:
         if message is not None:
             self.toast.present("Your week in posture", message, theme.IN_TOLERANCE)
 
