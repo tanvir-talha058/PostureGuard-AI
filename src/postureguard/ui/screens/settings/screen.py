@@ -16,6 +16,7 @@ from ....config import Config
 from ....monitor_profile import MonitorProfiles
 from ....session import SessionStore
 from ...widgets import PageHeader
+from .ai import AiPanel
 from .breaks import BreaksPanel
 from .calibration import CalibrationPanel
 from .detection import DetectionPanel
@@ -30,6 +31,7 @@ S = theme.SPACE
 class SettingsScreen(QWidget):
     changed = Signal(object)  # Config
     recalibrate_requested = Signal()
+    regenerate_cue_variants_requested = Signal()
 
     def __init__(
         self,
@@ -97,6 +99,13 @@ class SettingsScreen(QWidget):
         self.privacy.changed.connect(self._emit)
         layout.addWidget(self.privacy)
 
+        self.ai = AiPanel(config)
+        self.ai.changed.connect(self._emit)
+        self.ai.regenerate_cue_variants_requested.connect(
+            self.regenerate_cue_variants_requested
+        )
+        layout.addWidget(self.ai)
+
         layout.addStretch(1)
 
         # Flattened aliases: external callers (Application) and tests reach into a
@@ -160,6 +169,11 @@ class SettingsScreen(QWidget):
             calibration_profile=self.profile.currentText() or self.config.calibration_profile,
             auto_profile_by_monitor=self.calibration.auto_by_monitor.isChecked(),
             theme_mode=self.appearance.theme_mode.currentData() or "dark",
+            ai_api_key=self.ai.api_key.text().strip(),
+            ai_weekly_summary_enabled=self.ai.weekly_summary.isChecked(),
+            ai_insights_enabled=self.ai.insights.isChecked(),
+            ai_cue_variants_enabled=self.ai.cue_variants.isChecked(),
+            ai_exercise_context_enabled=self.ai.exercise_context.isChecked(),
         )
         self.changed.emit(self.config)
 

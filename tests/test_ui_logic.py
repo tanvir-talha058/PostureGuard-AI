@@ -259,6 +259,48 @@ class TestMonitorProfileSettings:
         assert reloaded.get(_current_arrangement()) == "default"
 
 
+class TestAiPanel:
+    def test_reflects_the_configured_key_and_toggles(self, qt_app):
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings.screen import SettingsScreen
+
+        config = Config(
+            ai_api_key="sk-ant-test",
+            ai_weekly_summary_enabled=True,
+            ai_insights_enabled=True,
+            ai_cue_variants_enabled=True,
+            ai_exercise_context_enabled=True,
+        )
+        screen = SettingsScreen(config)
+        assert screen.ai.api_key.text() == "sk-ant-test"
+        assert screen.ai.weekly_summary.isChecked() is True
+        assert screen.ai.insights.isChecked() is True
+        assert screen.ai.cue_variants.isChecked() is True
+        assert screen.ai.exercise_context.isChecked() is True
+
+    def test_emitted_config_carries_the_ai_fields(self, qt_app):
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings.screen import SettingsScreen
+
+        screen = SettingsScreen(Config())
+        received = []
+        screen.changed.connect(received.append)
+        screen.ai.api_key.setText("sk-ant-new")
+        screen.ai.api_key.editingFinished.emit()
+        assert received
+        assert received[-1].ai_api_key == "sk-ant-new"
+
+    def test_regenerate_button_emits_a_dedicated_signal(self, qt_app):
+        from postureguard.config import Config
+        from postureguard.ui.screens.settings.screen import SettingsScreen
+
+        screen = SettingsScreen(Config())
+        received = []
+        screen.regenerate_cue_variants_requested.connect(lambda: received.append(True))
+        screen.ai.regenerate.click()
+        assert received == [True]
+
+
 class TestCameraPicker:
     def _screen(self, cameras, **config_kwargs):
         from postureguard.config import Config

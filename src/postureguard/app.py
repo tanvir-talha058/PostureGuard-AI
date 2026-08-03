@@ -11,6 +11,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import autostart, paths, sound, theme
+from .ai import cue_variants as ai_cue_variants
 from .ai import exercise_context as ai_exercise_context
 from .ai import insights as ai_insights
 from .ai import weekly_summary as ai_weekly_summary
@@ -151,6 +152,9 @@ class Application:
 
         self.settings.changed.connect(self._on_config_changed)
         self.settings.recalibrate_requested.connect(self._on_recalibrate_from_settings)
+        self.settings.regenerate_cue_variants_requested.connect(
+            self._on_regenerate_cue_variants
+        )
 
         # A dock/undock changes the connected monitors without restarting the app —
         # the startup check alone would miss that.
@@ -334,6 +338,25 @@ class Application:
     def _on_recalibrate_from_settings(self) -> None:
         self.controller.recalibrate()
         self.window.show_screen("live")
+
+    def _on_regenerate_cue_variants(self) -> None:
+        if not self.config.ai_api_key:
+            self.toast.present("AI features", "Add an API key first.", theme.WARNING)
+            return
+        api_key = self.config.ai_api_key
+        self._cue_variant_worker = AskWorker(lambda: ai_cue_variants.generate_variants(api_key))
+        self._cue_variant_worker.finished_with.connect(self._on_cue_variants_ready)
+        self._cue_variant_worker.start()
+
+    def _on_cue_variants_ready(self, cache) -> None:
+        if cache is None:
+            self.toast.present(
+                "AI features", "Couldn't generate phrasings — check the API key.", theme.WARNING
+            )
+            return
+        cache.save(paths.cue_variants_path())
+        self.controller.reload_cue_variants()
+        self.toast.present("AI features", "Correction phrasing refreshed.", theme.IN_TOLERANCE)
 
     def _maybe_auto_switch_profile(self, *_args) -> None:
         """Switch calibration_profile if the connected monitors match a remembered setup.
