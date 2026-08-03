@@ -7,8 +7,8 @@ can trigger is an explicit, user-initiated question.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QVBoxLayout, QWidget
 from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QVBoxLayout, QWidget
 
 from ... import theme
 from ...ai.weekly_summary import build_stats_payload

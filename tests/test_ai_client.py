@@ -2,7 +2,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import anthropic
-import pytest
 
 from postureguard.ai.client import ask
 
@@ -44,6 +43,15 @@ class TestAsk:
         )
         assert ask("system", "content", "sk-ant-test") is None
 
+    def test_returns_none_on_max_tokens_truncation(self, monkeypatch):
+        fake_client = _FakeStream(
+            _text_response("this got cut off mid-sen", stop_reason="max_tokens")
+        )
+        monkeypatch.setattr(
+            "postureguard.ai.client.anthropic.Anthropic", lambda **_kwargs: fake_client
+        )
+        assert ask("system", "content", "sk-ant-test") is None
+
     def test_returns_none_on_api_error(self, monkeypatch):
         def _raise(**_kwargs):
             raise anthropic.APIConnectionError(request=MagicMock())
@@ -75,3 +83,35 @@ class TestAsk:
             "format": {"type": "json_schema"},
         }
         assert captured["model"] == "claude-opus-5"
+
+    def test_disables_thinking_for_structured_output_requests(self, monkeypatch):
+        captured = {}
+
+        def _create(**kwargs):
+            captured.update(kwargs)
+            return _text_response("ok")
+
+        fake_client = SimpleNamespace(
+            with_options=lambda **_k: SimpleNamespace(messages=SimpleNamespace(create=_create))
+        )
+        monkeypatch.setattr(
+            "postureguard.ai.client.anthropic.Anthropic", lambda **_kwargs: fake_client
+        )
+        ask("sys", "content", "sk-ant-test", output_format={"type": "json_schema"})
+        assert captured["thinking"] == {"type": "disabled"}
+
+    def test_leaves_thinking_unset_for_freeform_requests(self, monkeypatch):
+        captured = {}
+
+        def _create(**kwargs):
+            captured.update(kwargs)
+            return _text_response("ok")
+
+        fake_client = SimpleNamespace(
+            with_options=lambda **_k: SimpleNamespace(messages=SimpleNamespace(create=_create))
+        )
+        monkeypatch.setattr(
+            "postureguard.ai.client.anthropic.Anthropic", lambda **_kwargs: fake_client
+        )
+        ask("sys", "content", "sk-ant-test")
+        assert "thinking" not in captured

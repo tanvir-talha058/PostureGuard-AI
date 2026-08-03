@@ -20,7 +20,7 @@ MODEL = "claude-opus-5"
 #: on-demand user action, so this only bounds worst-case wait — it never blocks a
 #: frame loop.
 TIMEOUT_SECONDS = 15.0
-MAX_TOKENS = 1024
+MAX_TOKENS = 4096
 
 
 def ask(
@@ -38,8 +38,17 @@ def ask(
         return None
 
     output_config: dict = {"effort": effort}
+    request_kwargs: dict = {}
     if output_format is not None:
         output_config["format"] = output_format
+        # Structured-output requests (cue variants) pack many strings into the JSON
+        # response, leaving little of the shared max_tokens budget for adaptive
+        # thinking (on by default when unset). Disabling it is legal at this
+        # module's "low" effort — only xhigh/max reject the disable — and removes
+        # thinking tokens from the budget entirely for these calls. Freeform-text
+        # callers (weekly summary, insights, exercise context) leave thinking
+        # unset since they don't have the same multi-string budget pressure.
+        request_kwargs["thinking"] = {"type": "disabled"}
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -49,14 +58,18 @@ def ask(
             system=system,
             output_config=output_config,
             messages=[{"role": "user", "content": user_content}],
+            **request_kwargs,
         )
         if response.stop_reason == "refusal":
+            return None
+        if response.stop_reason == "max_tokens":
+            log.info("AI request truncated: hit max_tokens")
             return None
         return next((block.text for block in response.content if block.type == "text"), None)
     except anthropic.AnthropicError as exc:
         log.info("AI request failed: %s", exc)
         return None
-    except Exception as exc:  # noqa: BLE001 - a network/timeout failure must never
+    except Exception as exc:  # a network/timeout failure must never
         # propagate into the Qt event loop or a background worker thread.
         log.info("AI request failed unexpectedly: %s", exc)
         return None

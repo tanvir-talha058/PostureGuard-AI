@@ -471,8 +471,8 @@ class TestCueVariants:
     def test_reload_cue_variants_picks_up_a_saved_cache(self, tmp_path, monkeypatch):
         monkeypatch.setattr("postureguard.ui.controller.paths.data_dir", lambda: tmp_path)
         controller = MonitorController(Config(), SessionStore())
-        from postureguard.ai.cue_variants import CueVariantCache
         from postureguard import paths
+        from postureguard.ai.cue_variants import CueVariantCache
 
         CueVariantCache(variants={"forward_head": {"cue": ["X"]}}).save(
             paths.cue_variants_path()

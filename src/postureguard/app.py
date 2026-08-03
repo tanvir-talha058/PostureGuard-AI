@@ -260,7 +260,7 @@ class Application:
             self._exercise_context_worker.start()
 
     def _on_insights_asked(self, question: str) -> None:
-        if not self.config.ai_api_key:
+        if not self.config.ai_insights_enabled or not self.config.ai_api_key:
             self.insights.show_no_key()
             return
         payload = self.insights.stats_payload()
@@ -344,11 +344,13 @@ class Application:
             self.toast.present("AI features", "Add an API key first.", theme.WARNING)
             return
         api_key = self.config.ai_api_key
+        self.settings.ai.regenerate.setEnabled(False)
         self._cue_variant_worker = AskWorker(lambda: ai_cue_variants.generate_variants(api_key))
         self._cue_variant_worker.finished_with.connect(self._on_cue_variants_ready)
         self._cue_variant_worker.start()
 
     def _on_cue_variants_ready(self, cache) -> None:
+        self.settings.ai.regenerate.setEnabled(True)
         if cache is None:
             self.toast.present(
                 "AI features", "Couldn't generate phrasings — check the API key.", theme.WARNING

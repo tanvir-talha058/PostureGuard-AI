@@ -332,6 +332,32 @@ class TestFixingTheCameraFromSettingsAfterAFailedStart:
             application.shutdown()
 
 
+class TestInsightsRespectsTheToggle:
+    """ai_insights_enabled must gate the question flow independently of the API
+    key — a valid key alone must not be enough to dispatch a worker."""
+
+    def test_a_disabled_toggle_shows_no_key_even_with_a_valid_api_key(
+        self, qt_app, isolated_home, no_dialogs, monkeypatch
+    ):
+        rig(monkeypatch, fails_for=frozenset())
+        application = Application(
+            Config(
+                camera_index=0,
+                mini_window=False,
+                ai_insights_enabled=False,
+                ai_api_key="sk-ant-test",
+            )
+        )
+        try:
+            shown = []
+            monkeypatch.setattr(application.insights, "show_no_key", lambda: shown.append(1))
+            application._on_insights_asked("How am I doing?")
+            assert shown == [1]
+            assert not hasattr(application, "_insights_worker")
+        finally:
+            application.shutdown()
+
+
 class TestAutoSwitchByMonitorSetup:
     """The remembered-arrangement -> profile mapping is looked up before the very
     first controller.start(), mirroring how the camera self-heal above also runs

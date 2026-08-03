@@ -24,7 +24,7 @@ class AskWorker(QThread):
     def run(self) -> None:
         try:
             result = self._work()
-        except Exception:  # noqa: BLE001 - a background thread must never crash
+        except Exception:  # a background thread must never crash
             # the app; every caller already treats None as "this failed."
             result = None
         self.finished_with.emit(result)
