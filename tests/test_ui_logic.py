@@ -661,3 +661,46 @@ class TestAiIntro:
             screen.set_ai_intro("stale text from a previous break")
             screen.refresh()
             assert screen.ai_intro.isVisible() is False
+
+
+class TestInsightsScreen:
+    def test_asking_a_question_emits_it(self, qt_app):
+        from postureguard.ui.screens.insights import InsightsScreen
+
+        with SessionStore() as store:
+            screen = InsightsScreen(store)
+            received = []
+            screen.asked.connect(received.append)
+            screen.question.setText("why do I slouch?")
+            screen._ask()
+            assert received == ["why do I slouch?"]
+
+    def test_blank_question_does_not_emit(self, qt_app):
+        from postureguard.ui.screens.insights import InsightsScreen
+
+        with SessionStore() as store:
+            screen = InsightsScreen(store)
+            received = []
+            screen.asked.connect(received.append)
+            screen.question.setText("   ")
+            screen._ask()
+            assert received == []
+
+    def test_show_answer_re_enables_the_form(self, qt_app):
+        from postureguard.ui.screens.insights import InsightsScreen
+
+        with SessionStore() as store:
+            screen = InsightsScreen(store)
+            screen.show_asking()
+            assert screen.ask_button.isEnabled() is False
+            screen.show_answer("an answer")
+            assert screen.ask_button.isEnabled() is True
+            assert screen.answer.text() == "an answer"
+
+    def test_show_answer_none_reports_the_failure(self, qt_app):
+        from postureguard.ui.screens.insights import InsightsScreen
+
+        with SessionStore() as store:
+            screen = InsightsScreen(store)
+            screen.show_answer(None)
+            assert "Settings" in screen.answer.text()

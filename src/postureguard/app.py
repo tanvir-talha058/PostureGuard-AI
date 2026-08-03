@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import autostart, paths, sound, theme
 from .ai import exercise_context as ai_exercise_context
+from .ai import insights as ai_insights
 from .ai import weekly_summary as ai_weekly_summary
 from .ai.cue_variants import pick as pick_cue_variant
 from .ai.worker import AskWorker
@@ -26,6 +27,7 @@ from .ui.controller import MonitorController
 from .ui.design import stylesheet
 from .ui.screens.exercises import ExercisesScreen
 from .ui.screens.history import HistoryScreen
+from .ui.screens.insights import InsightsScreen
 from .ui.screens.live import LiveScreen
 from .ui.screens.settings import SettingsScreen
 from .ui.window import MainWindow
@@ -59,6 +61,7 @@ class Application:
         self.live = LiveScreen(config.thresholds(), self.store)
         self.history = HistoryScreen(self.store)
         self.exercises = ExercisesScreen(self.store)
+        self.insights = InsightsScreen(self.store)
         self._monitor_profiles = MonitorProfiles.load(paths.monitor_profiles_path())
         # Real devices, by name. The picker used to offer a fixed "Camera 0/1/2" whether
         # or not those existed, so selecting one could tear down a working camera to
@@ -70,6 +73,7 @@ class Application:
         self.window.add_screen("live", self.live)
         self.window.add_screen("history", self.history)
         self.window.add_screen("exercises", self.exercises)
+        self.window.add_screen("insights", self.insights)
         self.window.add_screen("settings", self.settings)
         self.window.show_screen("live")
 
@@ -143,6 +147,7 @@ class Application:
         self.live.mini_toggled.connect(self.toggle_mini)
         self.toast.snoozed.connect(self.controller.snooze)
         self.exercises.break_taken.connect(self.controller.breaks.taken)
+        self.insights.asked.connect(self._on_insights_asked)
 
         self.settings.changed.connect(self._on_config_changed)
         self.settings.recalibrate_requested.connect(self._on_recalibrate_from_settings)
@@ -249,6 +254,25 @@ class Application:
             )
             self._exercise_context_worker.finished_with.connect(self.exercises.set_ai_intro)
             self._exercise_context_worker.start()
+
+    def _on_insights_asked(self, question: str) -> None:
+        if not self.config.ai_api_key:
+            self.insights.show_no_key()
+            return
+        payload = self.insights.stats_payload()
+        if payload is None:
+            self.insights.show_answer(
+                "Not enough tracked history yet to answer questions — check back after "
+                "a few days of use."
+            )
+            return
+        self.insights.show_asking()
+        api_key = self.config.ai_api_key
+        self._insights_worker = AskWorker(
+            lambda: ai_insights.answer_question(payload, question, api_key)
+        )
+        self._insights_worker.finished_with.connect(self.insights.show_answer)
+        self._insights_worker.start()
 
     def _on_config_changed(self, config: Config) -> None:
         # The settings screen owns whether the mini window exists; the window itself
