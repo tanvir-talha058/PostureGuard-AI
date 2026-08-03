@@ -177,6 +177,10 @@ class ExercisesScreen(QWidget):
         self._reason_text = label("", "Body")
         self._reason_text.setWordWrap(True)
         self.reason.add(self._reason_text)
+        self.ai_intro = label("", "Body")
+        self.ai_intro.setWordWrap(True)
+        self.ai_intro.setVisible(False)
+        self.reason.add(self.ai_intro)
         layout.addWidget(self.reason)
 
         scroll = QScrollArea()
@@ -199,7 +203,15 @@ class ExercisesScreen(QWidget):
         self._show_all.setText("Show recommended" if self._showing_all else "Show all")
         self.refresh()
 
+    def set_ai_intro(self, text: str | None) -> None:
+        if text:
+            self.ai_intro.setText(text)
+            self.ai_intro.setVisible(True)
+        else:
+            self.ai_intro.setVisible(False)
+
     def refresh(self) -> None:
+        self.set_ai_intro(None)
         dominant = self.store.dominant_fault(days=7)
         if self._showing_all:
             self._reason_text.setText(

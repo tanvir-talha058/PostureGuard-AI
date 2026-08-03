@@ -11,6 +11,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import autostart, paths, sound, theme
+from .ai import exercise_context as ai_exercise_context
 from .ai import weekly_summary as ai_weekly_summary
 from .ai.cue_variants import pick as pick_cue_variant
 from .ai.worker import AskWorker
@@ -240,6 +241,14 @@ class Application:
             f"about {routine.seconds // 60} minutes.",
         )
         self.exercises.refresh()
+        if self.config.ai_exercise_context_enabled and self.config.ai_api_key:
+            dominant = self.store.dominant_fault(days=7)
+            api_key = self.config.ai_api_key
+            self._exercise_context_worker = AskWorker(
+                lambda: ai_exercise_context.generate_intro(dominant, self.store, api_key)
+            )
+            self._exercise_context_worker.finished_with.connect(self.exercises.set_ai_intro)
+            self._exercise_context_worker.start()
 
     def _on_config_changed(self, config: Config) -> None:
         # The settings screen owns whether the mini window exists; the window itself

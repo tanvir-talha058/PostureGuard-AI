@@ -14,7 +14,9 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication
 
 from postureguard import theme
+from postureguard.session import SessionStore
 from postureguard.ui.charts import Bar, ColumnChart, RankedBarChart, score_color
+from postureguard.ui.screens.exercises import ExercisesScreen
 from postureguard.ui.widgets import Card, PageHeader, StatTile, label
 
 
@@ -622,3 +624,40 @@ class TestCrispPixelSnapping:
 
         for value in (0, 1, 7, 10.3, 42, -3.2):
             assert crisp(value, 1.0) == round(value) + 0.5
+
+
+class TestAiIntro:
+    """isVisible() reflects the whole ancestor chain, not just this widget's own
+    setVisible() flag — Qt hides children of a never-shown top-level window
+    regardless. Each screen is shown here so isVisible() actually exercises the
+    behaviour under test rather than being trivially False either way."""
+
+    def test_hidden_by_default(self, qt_app):
+        with SessionStore() as store:
+            screen = ExercisesScreen(store)
+            screen.show()
+            assert screen.ai_intro.isVisible() is False
+
+    def test_shown_when_set(self, qt_app):
+        with SessionStore() as store:
+            screen = ExercisesScreen(store)
+            screen.show()
+            screen.set_ai_intro("Because you've been craning forward.")
+            assert screen.ai_intro.isVisible() is True
+            assert screen.ai_intro.text() == "Because you've been craning forward."
+
+    def test_cleared_by_none(self, qt_app):
+        with SessionStore() as store:
+            screen = ExercisesScreen(store)
+            screen.show()
+            screen.set_ai_intro("some text")
+            screen.set_ai_intro(None)
+            assert screen.ai_intro.isVisible() is False
+
+    def test_refresh_clears_a_stale_intro(self, qt_app):
+        with SessionStore() as store:
+            screen = ExercisesScreen(store)
+            screen.show()
+            screen.set_ai_intro("stale text from a previous break")
+            screen.refresh()
+            assert screen.ai_intro.isVisible() is False
