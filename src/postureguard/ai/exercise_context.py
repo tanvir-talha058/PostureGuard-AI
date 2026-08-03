@@ -10,7 +10,6 @@ the design spec.
 from __future__ import annotations
 
 import json
-from datetime import datetime
 
 from ..rules import FAULT_TITLES, FaultKind
 from ..session import SessionStore
@@ -31,14 +30,6 @@ def generate_intro(dominant: FaultKind | None, store: SessionStore, api_key: str
     fault to explain, or on any API failure."""
     if dominant is None:
         return None
-
-    # Infer the reference date from the most recent logged timestamp so the test can work
-    # with historical data while remaining backward-compatible with real usage.
-    most_recent_timestamp = store._db.execute("SELECT MAX(ts) FROM samples").fetchone()[0]
-    today = None
-    if most_recent_timestamp is not None:
-        today = datetime.fromtimestamp(most_recent_timestamp).date()
-
-    minutes = round(store.fault_breakdown(days=7, today=today).get(dominant, 0) / 60)
+    minutes = round(store.fault_breakdown(days=7).get(dominant, 0) / 60)
     payload = {"fault": FAULT_TITLES[dominant], "minutes_this_week": minutes}
     return ask(_SYSTEM_PROMPT, json.dumps(payload), api_key, effort="low")

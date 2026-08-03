@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from postureguard.ai.exercise_context import generate_intro
@@ -26,7 +28,7 @@ class TestGenerateIntro:
                 [__import__("postureguard.rules", fromlist=["Fault"]).Fault(
                     kind=FaultKind.FORWARD_HEAD, severity=1.0, cue="c"
                 )],
-                when=1_700_000_000 + s,
+                when=time.time() - (120 - s),
             )
         captured = {}
 
