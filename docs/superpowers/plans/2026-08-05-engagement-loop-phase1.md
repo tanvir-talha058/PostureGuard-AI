@@ -58,10 +58,12 @@ class TestStreaks:
         assert store.current_streak(today=TODAY) == 2
 
     def test_respects_custom_threshold(self, store):
-        # 900s in_tolerance out of 1800s tracked = 50% score.
+        # 900s in_tolerance, 900s fault -> 50% score. Below the default 80% threshold
+        # but above a relaxed 40% threshold.
         fill(store, TODAY, 9, 900, "in_tolerance")
-        fill(store, TODAY, 9, 900, "fault", CRANING)  # different second range would overlap; use hour 10 instead
-        assert store.current_streak(threshold=40.0, today=TODAY) >= 0  # placeholder removed below
+        fill(store, TODAY, 10, 900, "fault", CRANING)
+        assert store.current_streak(today=TODAY) == 0
+        assert store.current_streak(threshold=40.0, today=TODAY) == 1
 
 
 class TestFaultRange:
@@ -79,18 +81,6 @@ class TestFaultRange:
         fill(store, TODAY, 10, 40, "fault", CRANING)
         result = store.fault_seconds_in_range(TODAY, TODAY)
         assert list(result.keys()) == [FaultKind.FORWARD_HEAD, FaultKind.LATERAL_TILT]
-```
-
-Delete the placeholder `test_respects_custom_threshold` body above and replace it with a concrete assertion before running — write it for real as:
-
-```python
-    def test_respects_custom_threshold(self, store):
-        # 900s in_tolerance, 900s fault -> 50% score. Below the default 80% threshold
-        # but above a relaxed 40% threshold.
-        fill(store, TODAY, 9, 900, "in_tolerance")
-        fill(store, TODAY, 10, 900, "fault", CRANING)
-        assert store.current_streak(today=TODAY) == 0
-        assert store.current_streak(threshold=40.0, today=TODAY) == 1
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -794,6 +784,6 @@ git commit -m "feat: show week-over-week trend on the History screen"
 ## Self-Review Notes
 
 - **Spec coverage:** Roadmap items 1 (streak & score — score already existed, streak added), 2 (milestone achievements), and 3 (weekly trend card) are each covered by a task. Score display itself needed no change (`score_tile` already existed on `LiveScreen`).
-- **No placeholders:** the draft `test_respects_custom_threshold` placeholder in Task 1 is explicitly replaced with a real assertion in the same task before implementation — flagged inline so the executing agent doesn't skip it.
+- **No placeholders:** confirmed no TBD/placeholder text remains in any task's code blocks.
 - **Type consistency:** `Achievement`, `WeeklyTrend` field names are identical everywhere they're constructed (Task 2/3) and consumed (Task 5/6). `HistoryScreen.__init__` signature change (Task 5) is the only breaking interface change, and its one call site (`app.py`) is updated in the same task.
 - **Out of scope reminder:** PDF/image export of the weekly trend card (roadmap item 3's "shareable... export") is Phase 3 work (report export), not this plan — this plan only adds the in-app card.
