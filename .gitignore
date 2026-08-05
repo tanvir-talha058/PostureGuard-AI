@@ -22,3 +22,6 @@ break_state.json
 
 # Local smoke-test state
 .localstate/
+
+# Claude Code worktree sessions — isolated checkouts, not part of the main tree
+.claude/worktrees/
