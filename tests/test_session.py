@@ -16,6 +16,10 @@ def at(day: date, hour: int = 10, second: int = 0) -> float:
 
 
 def fill(store: SessionStore, day: date, hour: int, seconds: int, status: str, faults=()):
+    # Reset rate limiter to allow filling any day in any order (backwards timestamps).
+    # The rate limiter prevents logging the same second twice, but when filling
+    # historical data out of order, we need to allow timestamps to go backwards.
+    store._last_logged = 0.0
     for s in range(seconds):
         store.log(status, faults, when=at(day, hour, s))
 
