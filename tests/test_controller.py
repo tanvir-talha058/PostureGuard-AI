@@ -460,3 +460,22 @@ class TestRecoveryFromAFailedStart:
         control.apply_config(Config(camera_index=99))
 
         assert attempts == []
+
+
+class TestCueVariants:
+    def test_starts_with_an_empty_cache_when_no_file_exists(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("postureguard.ui.controller.paths.data_dir", lambda: tmp_path)
+        controller = MonitorController(Config(), SessionStore())
+        assert controller.cue_variants.variants == {}
+
+    def test_reload_cue_variants_picks_up_a_saved_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("postureguard.ui.controller.paths.data_dir", lambda: tmp_path)
+        controller = MonitorController(Config(), SessionStore())
+        from postureguard import paths
+        from postureguard.ai.cue_variants import CueVariantCache
+
+        CueVariantCache(variants={"forward_head": {"cue": ["X"]}}).save(
+            paths.cue_variants_path()
+        )
+        controller.reload_cue_variants()
+        assert controller.cue_variants.variants["forward_head"]["cue"] == ["X"]

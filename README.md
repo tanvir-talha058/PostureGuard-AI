@@ -152,3 +152,16 @@ Frames live in memory and are overwritten. The session database stores a status,
 optional fault name and a severity number, once per second — the schema has no column
 that could hold image data, and there is a test asserting it. Everything is under a
 single local folder, shown in Settings.
+
+## AI features (optional)
+
+Four features can optionally call the Claude API to generate content — a richer
+weekly summary, an on-demand Insights screen, varied phrasing of the fixed
+correction text, and a short personalized note above your exercise routine. All four
+are off by default and require an Anthropic API key entered in Settings.
+
+Each one sends only aggregate numbers — daily scores, the worst hour, minutes spent
+in each named fault — or, for Insights, the question you type. None of them ever see
+a camera frame, a landmark, or a per-frame metric; the privacy guarantee above is
+unchanged. The real-time detection and correction loop has no network dependency
+whether or not any of these are turned on.

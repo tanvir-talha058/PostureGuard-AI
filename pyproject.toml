@@ -12,6 +12,7 @@ dependencies = [
     "opencv-python>=4.9",
     "PySide6>=6.6",
     "numpy>=1.26",
+    "anthropic>=0.120.2",
 ]
 
 [project.optional-dependencies]

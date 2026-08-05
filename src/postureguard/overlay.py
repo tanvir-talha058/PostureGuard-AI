@@ -77,6 +77,12 @@ class ViewModel:
     urgency: int = 0
     #: Seconds the current fault has gone uncorrected, for the "ignored for" readout.
     held_seconds: float = 0.0
+    #: A pre-resolved alternate phrasing for the primary fault's cue/action, or "" to
+    #: use `fault.cue`/`fault.action` unchanged. Resolved once per app.py update
+    #: (see `_update_mini`), never inside a paint method — repainting must never
+    #: re-roll the text, or it would flicker.
+    cue_text: str = ""
+    action_text: str = ""
 
     @property
     def primary_fault(self) -> Fault | None:
@@ -323,7 +329,7 @@ class PostureOverlay(QWidget):
 
         if fault is not None:
             painter.setPen(theme.BONE)
-            text = fault.action
+            text = self.model.action_text or fault.action
         else:
             painter.setPen(theme.MUTED)
             text = self._resting_text()
@@ -456,7 +462,7 @@ class PostureOverlay(QWidget):
         painter.drawText(
             QRectF(PAD, rect.top() + 22, self.width() - 2 * PAD - 52, 36),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap),
-            fault.cue,
+            self.model.cue_text or fault.cue,
         )
 
         self._hairline(painter, rect.bottom())

@@ -16,6 +16,8 @@ import numpy as np
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .. import paths, power, presentation
+from ..ai.cue_variants import CueVariantCache
+from ..ai.cue_variants import pick as pick_cue_variant
 from ..backoff import SnoozeBackoff
 from ..calibration import Baseline
 from ..capture import Camera, CameraConfig, CameraError
@@ -91,6 +93,7 @@ class MonitorController(QObject):
             paths.break_state_path(), config.break_interval_minutes, config.breaks_enabled
         )
         self.backoff = SnoozeBackoff.load(paths.snooze_backoff_path())
+        self.cue_variants = CueVariantCache.load(paths.cue_variants_path())
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -178,6 +181,10 @@ class MonitorController(QObject):
         if self.engine is not None:
             self.engine.recalibrate()
             self.escalator.reset()
+
+    def reload_cue_variants(self) -> None:
+        """Pick up a freshly regenerated cache without restarting the pipeline."""
+        self.cue_variants = CueVariantCache.load(paths.cue_variants_path())
 
     def snooze(self, minutes: float | None = None) -> None:
         minutes = self.config.snooze_minutes if minutes is None else minutes
@@ -348,7 +355,13 @@ class MonitorController(QObject):
             reading.faults, now, fullscreen_active=self._fullscreen_active
         )
         if intervention.toast_now and intervention.fault is not None:
-            self.toast_requested.emit(intervention.fault.title, intervention.fault.cue)
+            fault = intervention.fault
+            cue = (
+                pick_cue_variant(self.cue_variants, fault.kind, fault.cue)
+                if self.config.ai_cue_variants_enabled
+                else fault.cue
+            )
+            self.toast_requested.emit(fault.title, cue)
         self.dim_changed.emit(
             intervention.dim_progress if intervention.level is Level.DIM else 0.0
         )

@@ -135,6 +135,22 @@ class Config:
     start_minimized: bool = False
     launch_at_login: bool = False
 
+    # --- ai ---
+    #: Shared by every AI feature below. Stored in plaintext in config.json, same as
+    #: every other local setting — there is no OS keychain integration in this app.
+    ai_api_key: str = ""
+    #: A richer weekly note, generated from the same aggregates the static one uses.
+    #: Off by default: this is the only AI toggle that fires unprompted (once a week).
+    ai_weekly_summary_enabled: bool = False
+    #: Gates the Insights screen's ability to actually answer questions. The screen
+    #: itself is always present; without a key it just explains that.
+    ai_insights_enabled: bool = False
+    #: Alternate phrasings for the fixed correction text, regenerated at most once a
+    #: day and cached to disk — the live loop never calls the network for this.
+    ai_cue_variants_enabled: bool = False
+    #: A short AI-written intro above the (unchanged) exercise picks, once per break.
+    ai_exercise_context_enabled: bool = False
+
     def thresholds(self) -> Thresholds:
         """Detection thresholds implied by the current sensitivity.
 

@@ -26,6 +26,7 @@ SCREENS = (
     ("live", "Live"),
     ("history", "History"),
     ("exercises", "Exercises"),
+    ("insights", "Insights"),
     ("settings", "Settings"),
 )
 

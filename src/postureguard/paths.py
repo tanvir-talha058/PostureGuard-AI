@@ -95,5 +95,9 @@ def weekly_summary_path() -> Path:
     return data_dir() / "weekly_summary.json"
 
 
+def cue_variants_path() -> Path:
+    return data_dir() / "cue_variants.json"
+
+
 def monitor_profiles_path() -> Path:
     return data_dir() / "monitor_profiles.json"

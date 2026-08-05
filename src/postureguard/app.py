@@ -11,6 +11,12 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import autostart, paths, sound, theme
+from .ai import cue_variants as ai_cue_variants
+from .ai import exercise_context as ai_exercise_context
+from .ai import insights as ai_insights
+from .ai import weekly_summary as ai_weekly_summary
+from .ai.cue_variants import pick as pick_cue_variant
+from .ai.worker import AskWorker
 from .alerts import DimOverlay, Toast, app_icon
 from .capture import available_cameras
 from .config import Config
@@ -22,6 +28,7 @@ from .ui.controller import MonitorController
 from .ui.design import stylesheet
 from .ui.screens.exercises import ExercisesScreen
 from .ui.screens.history import HistoryScreen
+from .ui.screens.insights import InsightsScreen
 from .ui.screens.live import LiveScreen
 from .ui.screens.settings import SettingsScreen
 from .ui.window import MainWindow
@@ -55,6 +62,7 @@ class Application:
         self.live = LiveScreen(config.thresholds(), self.store)
         self.history = HistoryScreen(self.store)
         self.exercises = ExercisesScreen(self.store)
+        self.insights = InsightsScreen(self.store)
         self._monitor_profiles = MonitorProfiles.load(paths.monitor_profiles_path())
         # Real devices, by name. The picker used to offer a fixed "Camera 0/1/2" whether
         # or not those existed, so selecting one could tear down a working camera to
@@ -66,6 +74,7 @@ class Application:
         self.window.add_screen("live", self.live)
         self.window.add_screen("history", self.history)
         self.window.add_screen("exercises", self.exercises)
+        self.window.add_screen("insights", self.insights)
         self.window.add_screen("settings", self.settings)
         self.window.show_screen("live")
 
@@ -139,9 +148,13 @@ class Application:
         self.live.mini_toggled.connect(self.toggle_mini)
         self.toast.snoozed.connect(self.controller.snooze)
         self.exercises.break_taken.connect(self.controller.breaks.taken)
+        self.insights.asked.connect(self._on_insights_asked)
 
         self.settings.changed.connect(self._on_config_changed)
         self.settings.recalibrate_requested.connect(self._on_recalibrate_from_settings)
+        self.settings.regenerate_cue_variants_requested.connect(
+            self._on_regenerate_cue_variants
+        )
 
         # A dock/undock changes the connected monitors without restarting the app —
         # the startup check alone would miss that.
@@ -237,6 +250,33 @@ class Application:
             f"about {routine.seconds // 60} minutes.",
         )
         self.exercises.refresh()
+        if self.config.ai_exercise_context_enabled and self.config.ai_api_key:
+            dominant = self.store.dominant_fault(days=7)
+            api_key = self.config.ai_api_key
+            self._exercise_context_worker = AskWorker(
+                lambda: ai_exercise_context.generate_intro(dominant, self.store, api_key)
+            )
+            self._exercise_context_worker.finished_with.connect(self.exercises.set_ai_intro)
+            self._exercise_context_worker.start()
+
+    def _on_insights_asked(self, question: str) -> None:
+        if not self.config.ai_insights_enabled or not self.config.ai_api_key:
+            self.insights.show_no_key()
+            return
+        payload = self.insights.stats_payload()
+        if payload is None:
+            self.insights.show_answer(
+                "Not enough tracked history yet to answer questions — check back after "
+                "a few days of use."
+            )
+            return
+        self.insights.show_asking()
+        api_key = self.config.ai_api_key
+        self._insights_worker = AskWorker(
+            lambda: ai_insights.answer_question(payload, question, api_key)
+        )
+        self._insights_worker.finished_with.connect(self.insights.show_answer)
+        self._insights_worker.start()
 
     def _on_config_changed(self, config: Config) -> None:
         # The settings screen owns whether the mini window exists; the window itself
@@ -299,6 +339,27 @@ class Application:
         self.controller.recalibrate()
         self.window.show_screen("live")
 
+    def _on_regenerate_cue_variants(self) -> None:
+        if not self.config.ai_api_key:
+            self.toast.present("AI features", "Add an API key first.", theme.WARNING)
+            return
+        api_key = self.config.ai_api_key
+        self.settings.ai.regenerate.setEnabled(False)
+        self._cue_variant_worker = AskWorker(lambda: ai_cue_variants.generate_variants(api_key))
+        self._cue_variant_worker.finished_with.connect(self._on_cue_variants_ready)
+        self._cue_variant_worker.start()
+
+    def _on_cue_variants_ready(self, cache) -> None:
+        self.settings.ai.regenerate.setEnabled(True)
+        if cache is None:
+            self.toast.present(
+                "AI features", "Couldn't generate phrasings — check the API key.", theme.WARNING
+            )
+            return
+        cache.save(paths.cue_variants_path())
+        self.controller.reload_cue_variants()
+        self.toast.present("AI features", "Correction phrasing refreshed.", theme.IN_TOLERANCE)
+
     def _maybe_auto_switch_profile(self, *_args) -> None:
         """Switch calibration_profile if the connected monitors match a remembered setup.
 
@@ -334,9 +395,30 @@ class Application:
             return
         if not self.weekly_summary.due():
             return
-        message = build_message(self.store)
         self.weekly_summary.mark_shown()
         self.weekly_summary.save_state(paths.weekly_summary_path())
+
+        if self.config.ai_weekly_summary_enabled and self.config.ai_api_key:
+            payload = ai_weekly_summary.build_stats_payload(self.store)
+            if payload is not None:
+                api_key = self.config.ai_api_key
+                self._weekly_summary_worker = AskWorker(
+                    lambda: ai_weekly_summary.generate_message(payload, api_key)
+                )
+                self._weekly_summary_worker.finished_with.connect(
+                    self._on_weekly_summary_ready
+                )
+                self._weekly_summary_worker.start()
+                return
+
+        self._show_weekly_summary(build_message(self.store))
+
+    def _on_weekly_summary_ready(self, message: str | None) -> None:
+        # A None from the AI path (no network, refusal, timeout) falls back to the
+        # same static one-liner every other launch already uses.
+        self._show_weekly_summary(message if message is not None else build_message(self.store))
+
+    def _show_weekly_summary(self, message: str | None) -> None:
         if message is not None:
             self.toast.present("Your week in posture", message, theme.IN_TOLERANCE)
 
@@ -357,6 +439,14 @@ class Application:
     def _update_mini(self, state) -> None:
         if not self.mini.isVisible():
             return
+        fault = state.reading.faults[0] if state.reading.faults else None
+        cue_text = ""
+        action_text = ""
+        if fault is not None and self.config.ai_cue_variants_enabled:
+            cue_text = pick_cue_variant(self.controller.cue_variants, fault.kind, fault.cue)
+            action_text = pick_cue_variant(
+                self.controller.cue_variants, fault.kind, fault.action, field="action"
+            )
         self.mini.show_model(
             ViewModel(
                 metrics=state.reading.metrics,
@@ -365,6 +455,8 @@ class Application:
                 message=state.reading.message,
                 urgency=int(state.intervention.level),
                 held_seconds=state.intervention.held_seconds,
+                cue_text=cue_text,
+                action_text=action_text,
             )
         )
 
