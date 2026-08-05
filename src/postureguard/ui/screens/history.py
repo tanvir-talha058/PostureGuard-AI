@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget
 
 from ... import theme
 from ...achievements import compute_achievements
@@ -68,9 +68,23 @@ class HistoryScreen(QWidget):
             summary.addWidget(card, 1)
         layout.addLayout(summary)
 
-        charts = QGridLayout()
+        # Four cards (daily, breakdown+hourly, milestones, trend) at their natural
+        # content sizes can outgrow a fixed window height — the milestones list alone
+        # needs room for five fixed-height rows, non-negotiable now that the ghosting
+        # fix pins each row's height. Squeezed into a plain layout, the grid shrinks
+        # cards below what their content needs and the last milestone row clips
+        # against the card edge. A scroll area — the same pattern exercises.py already
+        # uses for its exercise list — sidesteps the negotiation entirely: the grid
+        # renders at its real preferred height and anything that doesn't fit the
+        # viewport scrolls, instead of every card being squeezed to fit.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        chart_host = QWidget()
+        charts = QGridLayout(chart_host)
         charts.setSpacing(S["lg"])
-        layout.addLayout(charts, 1)
+        scroll.setWidget(chart_host)
+        layout.addWidget(scroll, 1)
 
         self.daily_card = Card(
             "Daily posture score",
