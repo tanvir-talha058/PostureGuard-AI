@@ -244,6 +244,33 @@ class SessionStore:
             streak += 1
         return streak
 
+    def has_ever_had_a_clean_day(
+        self,
+        threshold: float = 80.0,
+        min_tracked_seconds: int = 1800,
+        days: int = 365,
+        today: date | None = None,
+    ) -> bool:
+        """Whether any day in the last `days` days cleared `threshold` with enough
+        tracked time behind it — a yes/no question the `first_clean_day` achievement
+        needs answered without materializing a year of `DaySummary` objects just to
+        scan them in Python.
+        """
+        end = today or date.today()
+        start = end - timedelta(days=days - 1)
+        row = self._db.execute(
+            "SELECT 1 FROM samples WHERE day >= ? AND day <= ?"
+            " GROUP BY day"
+            " HAVING COUNT(*) FILTER (WHERE status IN ('in_tolerance','drifting','fault'))"
+            "        >= ?"
+            "    AND (100.0 * COUNT(*) FILTER (WHERE status = 'in_tolerance')"
+            "         / NULLIF(COUNT(*) FILTER (WHERE status IN ('in_tolerance','drifting','fault')), 0))"
+            "        >= ?"
+            " LIMIT 1",
+            (start.isoformat(), end.isoformat(), min_tracked_seconds, threshold),
+        ).fetchone()
+        return row is not None
+
     def fault_seconds_in_range(self, start: date, end: date) -> dict[FaultKind, int]:
         """Seconds attributed to each fault type between start and end inclusive, most costly first."""
         rows = self._db.execute(

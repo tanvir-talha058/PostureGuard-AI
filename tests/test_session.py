@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from postureguard.rules import Fault, FaultKind
-from postureguard.session import SessionStore, STREAK_LOOKBACK_DAYS
+from postureguard.session import STREAK_LOOKBACK_DAYS, SessionStore
 
 TODAY = date(2026, 7, 25)
 CRANING = [Fault(FaultKind.FORWARD_HEAD, 2.0, "Pull your chin back.", ())]
@@ -273,6 +273,33 @@ class TestStreaks:
             day = TODAY - timedelta(days=offset)
             fill(store, day, 9, 1800, "in_tolerance")
         assert store.current_streak(today=TODAY) == STREAK_LOOKBACK_DAYS
+
+
+class TestHasEverHadACleanDay:
+    def test_false_when_no_history(self, store):
+        assert store.has_ever_had_a_clean_day(today=TODAY) is False
+
+    def test_true_once_one_day_clears_the_threshold(self, store):
+        fill(store, TODAY - timedelta(days=200), 9, 1800, "in_tolerance")
+        assert store.has_ever_had_a_clean_day(today=TODAY) is True
+
+    def test_false_when_tracked_time_is_below_the_minimum(self, store):
+        fill(store, TODAY, 9, 1799, "in_tolerance")
+        assert store.has_ever_had_a_clean_day(today=TODAY) is False
+
+    def test_false_when_score_is_below_the_threshold(self, store):
+        fill(store, TODAY, 9, 900, "in_tolerance")
+        fill(store, TODAY, 10, 900, "fault", CRANING)
+        assert store.has_ever_had_a_clean_day(today=TODAY) is False
+
+    def test_respects_custom_threshold(self, store):
+        fill(store, TODAY, 9, 900, "in_tolerance")
+        fill(store, TODAY, 10, 900, "fault", CRANING)
+        assert store.has_ever_had_a_clean_day(threshold=40.0, today=TODAY) is True
+
+    def test_outside_the_days_window_does_not_count(self, store):
+        fill(store, TODAY - timedelta(days=400), 9, 1800, "in_tolerance")
+        assert store.has_ever_had_a_clean_day(today=TODAY) is False
 
 
 class TestFaultRange:

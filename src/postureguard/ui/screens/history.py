@@ -129,6 +129,15 @@ class HistoryScreen(QWidget):
 
         self.set_range(14)
 
+    def set_baseline_path(self, path: Path) -> None:
+        """Repoint at a different profile's baseline after a calibration-profile switch.
+
+        Without this, the Milestones card's "Calibrated" achievement keeps reflecting
+        whichever profile was active when this screen was constructed, even after
+        the live config moves on to a different one.
+        """
+        self._baseline_path = path
+
     def set_range(self, days: int) -> None:
         self.days = days
         for value, control in self._range_buttons.items():
@@ -140,8 +149,9 @@ class HistoryScreen(QWidget):
     # --- data ---------------------------------------------------------------------
 
     def refresh(self) -> None:
-        self._fill_milestones()
-        self._fill_trend()
+        trend = compute_weekly_trend(self.store)
+        self._fill_milestones(trend)
+        self._fill_trend(trend)
 
         summaries = self.store.daily_summaries(days=self.days)
         tracked_total = sum(s.tracked_seconds for s in summaries)
@@ -160,7 +170,7 @@ class HistoryScreen(QWidget):
         self._fill_hourly()
         self._fill_summary(summaries, tracked_total)
 
-    def _fill_milestones(self) -> None:
+    def _fill_milestones(self, trend) -> None:
         while self._milestones_list.count():
             item = self._milestones_list.takeAt(0)
             widget = item.widget()
@@ -169,7 +179,7 @@ class HistoryScreen(QWidget):
                 widget.deleteLater()
 
         baseline = Baseline.load(self._baseline_path)
-        for achievement in compute_achievements(self.store, baseline):
+        for achievement in compute_achievements(self.store, baseline, trend):
             text = f"{'Earned' if achievement.earned else 'Not yet'} — {achievement.title}"
             row = label(text, "Body")
             # Elided, not wrapped — same reasoning as StatTile.set_value's note: a
@@ -198,8 +208,7 @@ class HistoryScreen(QWidget):
             self._milestones_list.addWidget(row)
         self._milestones_list.addStretch(1)
 
-    def _fill_trend(self) -> None:
-        trend = compute_weekly_trend(self.store)
+    def _fill_trend(self, trend) -> None:
         if trend is None:
             self._trend_label.setText("Not enough data yet to compare weeks.")
             self._trend_label.setStyleSheet(f"color: {theme.MUTED.name()};")

@@ -8,7 +8,7 @@ from datetime import date
 from .calibration import Baseline
 from .rules import FAULT_TITLES
 from .session import SessionStore
-from .weekly_trend import compute_weekly_trend
+from .weekly_trend import WeeklyTrend
 
 #: A day counts as "clean" once it clears this score with enough tracked time behind it.
 CLEAN_DAY_THRESHOLD = 80.0
@@ -26,20 +26,26 @@ class Achievement:
 def compute_achievements(
     store: SessionStore,
     baseline: Baseline | None,
+    trend: WeeklyTrend | None,
     today: date | None = None,
 ) -> list[Achievement]:
-    """Always returns the same 5 achievements, in the same order, earned or not."""
+    """Always returns the same 5 achievements, in the same order, earned or not.
+
+    `trend` is a precomputed `compute_weekly_trend()` result rather than one this
+    function derives itself — callers that already need the trend for their own
+    purposes (History's trend card) would otherwise pay for the same 7-day scan
+    twice per refresh.
+    """
     streak = store.current_streak(
         threshold=CLEAN_DAY_THRESHOLD,
         min_tracked_seconds=CLEAN_DAY_MIN_TRACKED_SECONDS,
         today=today,
     )
-    history = store.daily_summaries(days=365, today=today)
-    has_clean_day = any(
-        s.tracked_seconds >= CLEAN_DAY_MIN_TRACKED_SECONDS and s.score >= CLEAN_DAY_THRESHOLD
-        for s in history
+    has_clean_day = store.has_ever_had_a_clean_day(
+        threshold=CLEAN_DAY_THRESHOLD,
+        min_tracked_seconds=CLEAN_DAY_MIN_TRACKED_SECONDS,
+        today=today,
     )
-    trend = compute_weekly_trend(store, today=today)
     most_improved = trend.most_improved_fault if trend else None
 
     return [
