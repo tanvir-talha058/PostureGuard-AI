@@ -227,3 +227,55 @@ class TestPrivacy:
             row[1] for row in store._db.execute("PRAGMA table_info(samples)").fetchall()
         }
         assert columns == {"ts", "day", "hour", "status", "fault", "severity"}
+
+
+class TestStreaks:
+    def test_zero_when_no_history(self, store):
+        assert store.current_streak(today=TODAY) == 0
+
+    def test_counts_consecutive_clean_days_ending_today(self, store):
+        # Fill in chronological order (oldest first) to avoid rate limiter blocks
+        for offset in range(2, -1, -1):
+            day = TODAY - timedelta(days=offset)
+            fill(store, day, 9, 1800, "in_tolerance")
+        assert store.current_streak(today=TODAY) == 3
+
+    def test_a_bad_day_breaks_the_streak(self, store):
+        # Fill in chronological order (oldest first)
+        fill(store, TODAY - timedelta(days=2), 9, 1800, "in_tolerance")
+        fill(store, TODAY - timedelta(days=1), 9, 1800, "fault", CRANING)
+        fill(store, TODAY, 9, 1800, "in_tolerance")
+        assert store.current_streak(today=TODAY) == 1
+
+    def test_a_day_with_too_little_tracked_time_is_skipped_not_broken(self, store):
+        # Today has nothing logged yet (session hasn't started) — should not zero the streak.
+        # Fill in chronological order (oldest first)
+        fill(store, TODAY - timedelta(days=2), 9, 1800, "in_tolerance")
+        fill(store, TODAY - timedelta(days=1), 9, 1800, "in_tolerance")
+        assert store.current_streak(today=TODAY) == 2
+
+    def test_respects_custom_threshold(self, store):
+        # 900s in_tolerance, 900s fault -> 50% score. Below the default 80% threshold
+        # but above a relaxed 40% threshold.
+        fill(store, TODAY, 9, 900, "in_tolerance")
+        fill(store, TODAY, 10, 900, "fault", CRANING)
+        assert store.current_streak(today=TODAY) == 0
+        assert store.current_streak(threshold=40.0, today=TODAY) == 1
+
+
+class TestFaultRange:
+    def test_empty_range_returns_empty_dict(self, store):
+        assert store.fault_seconds_in_range(TODAY, TODAY) == {}
+
+    def test_counts_only_within_the_bounds(self, store):
+        # Fill in chronological order (oldest first)
+        fill(store, TODAY - timedelta(days=10), 9, 60, "fault", CRANING)
+        fill(store, TODAY - timedelta(days=1), 9, 30, "fault", TILTING)
+        result = store.fault_seconds_in_range(TODAY - timedelta(days=6), TODAY)
+        assert result == {FaultKind.LATERAL_TILT: 30}
+
+    def test_most_costly_first(self, store):
+        fill(store, TODAY, 9, 10, "fault", TILTING)
+        fill(store, TODAY, 10, 40, "fault", CRANING)
+        result = store.fault_seconds_in_range(TODAY, TODAY)
+        assert list(result.keys()) == [FaultKind.FORWARD_HEAD, FaultKind.LATERAL_TILT]
