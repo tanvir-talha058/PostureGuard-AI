@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 
 from ... import theme
+from ...achievements import compute_achievements
+from ...calibration import Baseline
 from ...rules import FAULT_TITLES
 from ...session import SessionStore
 from ..charts import Bar, ColumnChart, RankedBarChart
-from ..widgets import Card, EmptyState, PageHeader, StatTile, button
+from ..widgets import Card, EmptyState, PageHeader, StatTile, button, label, plain
 
 S = theme.SPACE
 
@@ -31,9 +35,10 @@ def _hour_label(hour: int) -> str:
 
 
 class HistoryScreen(QWidget):
-    def __init__(self, store: SessionStore) -> None:
-        super().__init__()
+    def __init__(self, store: SessionStore, baseline_path: Path, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
         self.store = store
+        self._baseline_path = baseline_path
         self.days = 14
 
         layout = QVBoxLayout(self)
@@ -88,6 +93,12 @@ class HistoryScreen(QWidget):
         self.hourly_card.add(self.hourly_chart, 1)
         charts.addWidget(self.hourly_card, 1, 1)
 
+        self.milestones_card = Card("Milestones", "A fixed set of things worth noticing.")
+        self._milestones_list = QVBoxLayout()
+        self._milestones_list.setSpacing(S["sm"])
+        self.milestones_card.add(plain(self._milestones_list))
+        charts.addWidget(self.milestones_card, 2, 0, 1, 2)
+
         self.empty = EmptyState(
             "No history yet",
             "Once you have spent a little time on the Live screen, your daily scores, "
@@ -108,6 +119,8 @@ class HistoryScreen(QWidget):
     # --- data ---------------------------------------------------------------------
 
     def refresh(self) -> None:
+        self._fill_milestones()
+
         summaries = self.store.daily_summaries(days=self.days)
         tracked_total = sum(s.tracked_seconds for s in summaries)
 
@@ -124,6 +137,26 @@ class HistoryScreen(QWidget):
         self._fill_breakdown()
         self._fill_hourly()
         self._fill_summary(summaries, tracked_total)
+
+    def _fill_milestones(self) -> None:
+        while self._milestones_list.count():
+            item = self._milestones_list.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        baseline = Baseline.load(self._baseline_path)
+        for achievement in compute_achievements(self.store, baseline):
+            row = label(
+                f"{'Earned' if achievement.earned else 'Not yet'} — {achievement.title}",
+                "Body",
+            )
+            row.setToolTip(achievement.description)
+            row.setStyleSheet(
+                f"color: {theme.IN_TOLERANCE.name()};" if achievement.earned
+                else f"color: {theme.MUTED.name()};"
+            )
+            self._milestones_list.addWidget(row)
 
     def _fill_daily(self, summaries) -> None:
         self.daily_chart.set_bars(

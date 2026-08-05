@@ -60,7 +60,9 @@ class Application:
         )
 
         self.live = LiveScreen(config.thresholds(), self.store)
-        self.history = HistoryScreen(self.store)
+        self.history = HistoryScreen(
+            self.store, paths.baseline_path(config.calibration_profile)
+        )
         self.exercises = ExercisesScreen(self.store)
         self.insights = InsightsScreen(self.store)
         self._monitor_profiles = MonitorProfiles.load(paths.monitor_profiles_path())
