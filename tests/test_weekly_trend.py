@@ -1,12 +1,11 @@
 from datetime import date, timedelta
 
 import pytest
+from test_session import CRANING, TILTING, fill  # reuse existing fixtures/helpers
 
 from postureguard.rules import FaultKind
 from postureguard.session import SessionStore
 from postureguard.weekly_trend import compute_weekly_trend
-
-from test_session import CRANING, TILTING, fill  # reuse existing fixtures/helpers
 
 TODAY = date(2026, 7, 25)
 
