@@ -309,6 +309,7 @@ class LiveScreen(QWidget):
         self.tracked_tile = StatTile("time at desk", "—")
         self.session_tile = StatTile("this session", "—")
         self.break_tile = StatTile("next break", "—")
+        self.streak_tile = StatTile("clean streak", "—", "days")
         # Top-aligned, so a tile that grows a note does not shove its neighbours out
         # of line and break the row's shared baseline.
         top = Qt.AlignmentFlag.AlignTop
@@ -316,6 +317,7 @@ class LiveScreen(QWidget):
         grid.addWidget(self.tracked_tile, 0, 1, top)
         grid.addWidget(self.session_tile, 1, 0, top)
         grid.addWidget(self.break_tile, 1, 1, top)
+        grid.addWidget(self.streak_tile, 2, 0, 1, 2, top)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
         today.add(plain(grid))
@@ -350,6 +352,10 @@ class LiveScreen(QWidget):
         self._mini.setText("Hide mini window" if shown else "Mini window")
 
     def refresh(self) -> None:
+        streak = self.store.current_streak()
+        self.streak_tile.set_value(
+            str(streak), note="consecutive clean days" if streak else "no active streak"
+        )
         summary = self.store.today()
         if summary.tracked_seconds == 0:
             self.score_tile.set_value("—", note="Nothing tracked yet")
