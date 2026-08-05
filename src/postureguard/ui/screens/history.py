@@ -151,6 +151,7 @@ class HistoryScreen(QWidget):
             item = self._milestones_list.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()
 
         baseline = Baseline.load(self._baseline_path)
@@ -169,6 +170,17 @@ class HistoryScreen(QWidget):
                 f"color: {theme.IN_TOLERANCE.name()};" if achievement.earned
                 else f"color: {theme.MUTED.name()};"
             )
+            # label(..., "Body") sets a heightForWidth size policy for prose that
+            # wraps — see _WRAPPING_ROLES in widgets.py. Disabling word wrap above
+            # does not undo that policy, so the label's sizeHint is still computed
+            # as if it might reflow. Under a forced offscreen render (grab()/render()
+            # without ever calling window.show(), as tools/preview_app.py does),
+            # that stale heightForWidth negotiation settles on a height far shorter
+            # than one real line needs, so consecutive rows get packed into less
+            # vertical space than their text occupies and paint on top of each
+            # other. StatTile._note sidesteps this the same way: pin a fixed pixel
+            # height so layout never asks heightForWidth for an answer at all.
+            row.setFixedHeight(metrics.height())
             self._milestones_list.addWidget(row)
         self._milestones_list.addStretch(1)
 
