@@ -211,8 +211,19 @@ class MonitorController(QObject):
             or config.mirror != self.config.mirror
             or config.calibration_profile != self.config.calibration_profile
         )
+        escalation_changed = (
+            config.toast_after_seconds != self.config.toast_after_seconds
+            or config.dim_after_seconds != self.config.dim_after_seconds
+            or config.alerts_enabled != self.config.alerts_enabled
+            or config.dim_enabled != self.config.dim_enabled
+        )
         self.config = config
-        self.escalator = self._build_escalator()
+        if escalation_changed:
+            # Only rebuilt when its own inputs changed — rebuilding on every settings
+            # tweak (including unrelated ones, and on every slider-drag tick) would
+            # drop in-progress escalation state (how long the fault has been held,
+            # whether a toast already fired) and defeat the toast cooldown.
+            self.escalator = self._build_escalator()
         self.breaks.enabled = config.breaks_enabled
         self.breaks.interval_seconds = config.break_interval_minutes * 60.0
         if self.engine is not None:

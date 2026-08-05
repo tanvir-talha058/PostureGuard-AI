@@ -202,7 +202,7 @@ class Routine:
 
 
 def exercises_for(fault: FaultKind | None) -> tuple[Exercise, ...]:
-    return tuple(e for e in ALL_EXERCISES if e.targets is fault)
+    return tuple(e for e in ALL_EXERCISES if e.targets is fault and fault is not None)
 
 
 _REASONS = {

@@ -86,6 +86,7 @@ class Toast(QWidget):
         self.setGraphicsEffect(self._opacity)
         self._fade = QPropertyAnimation(self._opacity, b"opacity", self)
         self._fade.setDuration(220)
+        self._fade_hides_on_finish = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -176,6 +177,12 @@ class Toast(QWidget):
         self._place()
 
         self._fade.stop()
+        # A prior dismiss() may have left its fade-out `finished` -> hide() handler
+        # connected; without disconnecting it here, this fade-in's completion would
+        # immediately re-trigger hide() and the toast would vanish right after showing.
+        if self._fade_hides_on_finish:
+            self._fade.finished.disconnect(self.hide)
+            self._fade_hides_on_finish = False
         self._opacity.setOpacity(0.0)
         self.show()
         self._fade.setStartValue(0.0)
@@ -198,13 +205,10 @@ class Toast(QWidget):
         self._fade.stop()
         self._fade.setStartValue(self._opacity.opacity())
         self._fade.setEndValue(0.0)
-        # disconnect any prior one-shot handler before attaching a new one, or the
-        # window ends up hidden by a stale finish signal from an earlier fade.
-        try:
-            self._fade.finished.disconnect()
-        except RuntimeError:
-            pass
-        self._fade.finished.connect(self.hide)
+        # Only connect once, or repeated dismiss() calls stack up duplicate handlers.
+        if not self._fade_hides_on_finish:
+            self._fade.finished.connect(self.hide)
+            self._fade_hides_on_finish = True
         self._fade.start()
 
 

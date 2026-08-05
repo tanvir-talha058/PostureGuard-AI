@@ -182,15 +182,8 @@ class Config:
             return cls()
         if not isinstance(raw, dict):
             return cls()
-        known = {f.name: f.type for f in fields(cls)}
-        accepted = {}
-        for key, value in raw.items():
-            if key not in known:
-                continue
-            try:
-                accepted[key] = value
-            except (TypeError, ValueError):
-                continue
+        known = {f.name for f in fields(cls)}
+        accepted = {key: value for key, value in raw.items() if key in known}
         try:
             return cls(**accepted)
         except TypeError:
