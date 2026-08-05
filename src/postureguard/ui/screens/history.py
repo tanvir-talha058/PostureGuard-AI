@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 
 from ... import theme
@@ -147,16 +148,22 @@ class HistoryScreen(QWidget):
 
         baseline = Baseline.load(self._baseline_path)
         for achievement in compute_achievements(self.store, baseline):
-            row = label(
-                f"{'Earned' if achievement.earned else 'Not yet'} — {achievement.title}",
-                "Body",
-            )
-            row.setToolTip(achievement.description)
+            text = f"{'Earned' if achievement.earned else 'Not yet'} — {achievement.title}"
+            row = label(text, "Body")
+            # Elided, not wrapped — same reasoning as StatTile.set_value's note: a
+            # wrapped label reports its full single-line width as a layout minimum
+            # and silently grows the card taller than intended.
+            row.setWordWrap(False)
+            metrics = row.fontMetrics()
+            width = max(row.width(), 80)
+            row.setText(metrics.elidedText(text, Qt.TextElideMode.ElideRight, width))
+            row.setToolTip(f"{text}\n{achievement.description}")
             row.setStyleSheet(
                 f"color: {theme.IN_TOLERANCE.name()};" if achievement.earned
                 else f"color: {theme.MUTED.name()};"
             )
             self._milestones_list.addWidget(row)
+        self._milestones_list.addStretch(1)
 
     def _fill_daily(self, summaries) -> None:
         self.daily_chart.set_bars(
