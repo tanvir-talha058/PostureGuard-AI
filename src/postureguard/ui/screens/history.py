@@ -12,6 +12,7 @@ from ...achievements import compute_achievements
 from ...calibration import Baseline
 from ...rules import FAULT_TITLES
 from ...session import SessionStore
+from ...weekly_trend import compute_weekly_trend
 from ..charts import Bar, ColumnChart, RankedBarChart
 from ..widgets import Card, EmptyState, PageHeader, StatTile, button, label, plain
 
@@ -100,6 +101,11 @@ class HistoryScreen(QWidget):
         self.milestones_card.add(plain(self._milestones_list))
         charts.addWidget(self.milestones_card, 2, 0, 1, 2)
 
+        self.trend_card = Card("This week vs. last week")
+        self._trend_label = label("Not enough data yet to compare weeks.", "Body")
+        self.trend_card.add(self._trend_label)
+        charts.addWidget(self.trend_card, 3, 0, 1, 2)
+
         self.empty = EmptyState(
             "No history yet",
             "Once you have spent a little time on the Live screen, your daily scores, "
@@ -121,6 +127,7 @@ class HistoryScreen(QWidget):
 
     def refresh(self) -> None:
         self._fill_milestones()
+        self._fill_trend()
 
         summaries = self.store.daily_summaries(days=self.days)
         tracked_total = sum(s.tracked_seconds for s in summaries)
@@ -164,6 +171,27 @@ class HistoryScreen(QWidget):
             )
             self._milestones_list.addWidget(row)
         self._milestones_list.addStretch(1)
+
+    def _fill_trend(self) -> None:
+        trend = compute_weekly_trend(self.store)
+        if trend is None:
+            self._trend_label.setText("Not enough data yet to compare weeks.")
+            self._trend_label.setStyleSheet(f"color: {theme.MUTED.name()};")
+            return
+
+        delta = trend.this_week_average - trend.last_week_average
+        direction = "up" if delta > 0 else "down" if delta < 0 else "unchanged"
+        text = f"Average score is {direction} {abs(delta):.0f} points versus last week."
+        if trend.most_improved_fault is not None:
+            fault_name = FAULT_TITLES.get(trend.most_improved_fault, trend.most_improved_fault.value)
+            text += (
+                f" {fault_name} time dropped by {_duration(trend.most_improved_seconds)}."
+            )
+        self._trend_label.setText(text)
+        self._trend_label.setStyleSheet(
+            f"color: {theme.IN_TOLERANCE.name()};" if delta >= 0
+            else f"color: {theme.WARNING.name()};"
+        )
 
     def _fill_daily(self, summaries) -> None:
         self.daily_chart.set_bars(
