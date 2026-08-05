@@ -60,7 +60,9 @@ class Application:
         )
 
         self.live = LiveScreen(config.thresholds(), self.store)
-        self.history = HistoryScreen(self.store)
+        self.history = HistoryScreen(
+            self.store, paths.baseline_path(config.calibration_profile)
+        )
         self.exercises = ExercisesScreen(self.store)
         self.insights = InsightsScreen(self.store)
         self._monitor_profiles = MonitorProfiles.load(paths.monitor_profiles_path())
@@ -291,6 +293,7 @@ class Application:
         login_changed = config.launch_at_login != self.config.launch_at_login
         hotkeys_changed = config.hotkeys_enabled != self.config.hotkeys_enabled
         theme_changed = config.theme_mode != self.config.theme_mode
+        profile_changed = config.calibration_profile != self.config.calibration_profile
         self.config = config
         if login_changed:
             autostart.apply(config.launch_at_login)
@@ -304,6 +307,8 @@ class Application:
         self.live.video.thresholds = config.thresholds()
         self.mini.set_always_on_top(config.mini_always_on_top)
 
+        if profile_changed:
+            self.history.set_baseline_path(paths.baseline_path(config.calibration_profile))
         if config.mini_window != was_shown:
             self.set_mini_visible(config.mini_window)
         if retention_changed:

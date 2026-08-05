@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from postureguard import theme  # noqa: E402
+from postureguard import paths, theme  # noqa: E402
 from postureguard.config import Config  # noqa: E402
 from postureguard.rules import Fault, FaultKind  # noqa: E402
 from postureguard.session import SessionStore  # noqa: E402
@@ -79,7 +79,7 @@ def main() -> int:
     window.resize(*theme.WINDOW_SIZE)
 
     live = LiveScreen(config.thresholds(), store)
-    history = HistoryScreen(store)
+    history = HistoryScreen(store, paths.baseline_path(config.calibration_profile))
     exercises = ExercisesScreen(store)
     settings = SettingsScreen(config)
 

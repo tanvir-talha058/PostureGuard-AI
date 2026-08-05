@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
@@ -13,6 +15,12 @@ from ..controller import LiveState
 from ..widgets import Card, PageHeader, StatTile, button, eyebrow, label, plain
 
 S = theme.SPACE
+
+#: current_streak() runs a GROUP BY scan over up to 60 days of history — cheap once,
+#: but expensive enough (hundreds of ms at real retention) that calling it on every
+#: 5-second Live refresh visibly hitches the camera view. The streak can only actually
+#: change once a day, so a minute of staleness costs nothing a user would notice.
+STREAK_CACHE_SECONDS = 60.0
 
 
 class VideoView(QWidget):
@@ -309,6 +317,7 @@ class LiveScreen(QWidget):
         self.tracked_tile = StatTile("time at desk", "—")
         self.session_tile = StatTile("this session", "—")
         self.break_tile = StatTile("next break", "—")
+        self.streak_tile = StatTile("clean streak", "—", "days")
         # Top-aligned, so a tile that grows a note does not shove its neighbours out
         # of line and break the row's shared baseline.
         top = Qt.AlignmentFlag.AlignTop
@@ -316,6 +325,7 @@ class LiveScreen(QWidget):
         grid.addWidget(self.tracked_tile, 0, 1, top)
         grid.addWidget(self.session_tile, 1, 0, top)
         grid.addWidget(self.break_tile, 1, 1, top)
+        grid.addWidget(self.streak_tile, 2, 0, 1, 2, top)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
         today.add(plain(grid))
@@ -327,6 +337,8 @@ class LiveScreen(QWidget):
         layout.addWidget(readings)
 
         self._since_refresh = 0.0
+        self._streak_cache: int | None = None
+        self._streak_cache_at: float = 0.0
 
     def on_state(self, state: LiveState) -> None:
         self.video.set_state(state)
@@ -350,6 +362,14 @@ class LiveScreen(QWidget):
         self._mini.setText("Hide mini window" if shown else "Mini window")
 
     def refresh(self) -> None:
+        now = time.time()
+        if self._streak_cache is None or now - self._streak_cache_at >= STREAK_CACHE_SECONDS:
+            self._streak_cache = self.store.current_streak()
+            self._streak_cache_at = now
+        streak = self._streak_cache
+        self.streak_tile.set_value(
+            str(streak), note="consecutive clean days" if streak else "no active streak"
+        )
         summary = self.store.today()
         if summary.tracked_seconds == 0:
             self.score_tile.set_value("—", note="Nothing tracked yet")

@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
+from pathlib import Path
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget
 
 from ... import theme
+from ...achievements import compute_achievements
+from ...calibration import Baseline
 from ...rules import FAULT_TITLES
 from ...session import SessionStore
+from ...weekly_trend import compute_weekly_trend
 from ..charts import Bar, ColumnChart, RankedBarChart
-from ..widgets import Card, EmptyState, PageHeader, StatTile, button
+from ..widgets import Card, EmptyState, PageHeader, StatTile, button, label, plain
 
 S = theme.SPACE
 
@@ -31,9 +37,10 @@ def _hour_label(hour: int) -> str:
 
 
 class HistoryScreen(QWidget):
-    def __init__(self, store: SessionStore) -> None:
-        super().__init__()
+    def __init__(self, store: SessionStore, baseline_path: Path, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
         self.store = store
+        self._baseline_path = baseline_path
         self.days = 14
 
         layout = QVBoxLayout(self)
@@ -61,9 +68,23 @@ class HistoryScreen(QWidget):
             summary.addWidget(card, 1)
         layout.addLayout(summary)
 
-        charts = QGridLayout()
+        # Four cards (daily, breakdown+hourly, milestones, trend) at their natural
+        # content sizes can outgrow a fixed window height — the milestones list alone
+        # needs room for five fixed-height rows, non-negotiable now that the ghosting
+        # fix pins each row's height. Squeezed into a plain layout, the grid shrinks
+        # cards below what their content needs and the last milestone row clips
+        # against the card edge. A scroll area — the same pattern exercises.py already
+        # uses for its exercise list — sidesteps the negotiation entirely: the grid
+        # renders at its real preferred height and anything that doesn't fit the
+        # viewport scrolls, instead of every card being squeezed to fit.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        chart_host = QWidget()
+        charts = QGridLayout(chart_host)
         charts.setSpacing(S["lg"])
-        layout.addLayout(charts, 1)
+        scroll.setWidget(chart_host)
+        layout.addWidget(scroll, 1)
 
         self.daily_card = Card(
             "Daily posture score",
@@ -88,6 +109,17 @@ class HistoryScreen(QWidget):
         self.hourly_card.add(self.hourly_chart, 1)
         charts.addWidget(self.hourly_card, 1, 1)
 
+        self.milestones_card = Card("Milestones", "A fixed set of things worth noticing.")
+        self._milestones_list = QVBoxLayout()
+        self._milestones_list.setSpacing(S["sm"])
+        self.milestones_card.add(plain(self._milestones_list))
+        charts.addWidget(self.milestones_card, 2, 0, 1, 2)
+
+        self.trend_card = Card("This week vs. last week")
+        self._trend_label = label("Not enough data yet to compare weeks.", "Body")
+        self.trend_card.add(self._trend_label)
+        charts.addWidget(self.trend_card, 3, 0, 1, 2)
+
         self.empty = EmptyState(
             "No history yet",
             "Once you have spent a little time on the Live screen, your daily scores, "
@@ -96,6 +128,15 @@ class HistoryScreen(QWidget):
         layout.addWidget(self.empty)
 
         self.set_range(14)
+
+    def set_baseline_path(self, path: Path) -> None:
+        """Repoint at a different profile's baseline after a calibration-profile switch.
+
+        Without this, the Milestones card's "Calibrated" achievement keeps reflecting
+        whichever profile was active when this screen was constructed, even after
+        the live config moves on to a different one.
+        """
+        self._baseline_path = path
 
     def set_range(self, days: int) -> None:
         self.days = days
@@ -108,6 +149,10 @@ class HistoryScreen(QWidget):
     # --- data ---------------------------------------------------------------------
 
     def refresh(self) -> None:
+        trend = compute_weekly_trend(self.store)
+        self._fill_milestones(trend)
+        self._fill_trend(trend)
+
         summaries = self.store.daily_summaries(days=self.days)
         tracked_total = sum(s.tracked_seconds for s in summaries)
 
@@ -124,6 +169,64 @@ class HistoryScreen(QWidget):
         self._fill_breakdown()
         self._fill_hourly()
         self._fill_summary(summaries, tracked_total)
+
+    def _fill_milestones(self, trend) -> None:
+        while self._milestones_list.count():
+            item = self._milestones_list.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.deleteLater()
+
+        baseline = Baseline.load(self._baseline_path)
+        for achievement in compute_achievements(self.store, baseline, trend):
+            text = f"{'Earned' if achievement.earned else 'Not yet'} — {achievement.title}"
+            row = label(text, "Body")
+            # Elided, not wrapped — same reasoning as StatTile.set_value's note: a
+            # wrapped label reports its full single-line width as a layout minimum
+            # and silently grows the card taller than intended.
+            row.setWordWrap(False)
+            metrics = row.fontMetrics()
+            width = max(row.width(), 80)
+            row.setText(metrics.elidedText(text, Qt.TextElideMode.ElideRight, width))
+            row.setToolTip(f"{text}\n{achievement.description}")
+            row.setStyleSheet(
+                f"color: {theme.IN_TOLERANCE.name()};" if achievement.earned
+                else f"color: {theme.MUTED.name()};"
+            )
+            # label(..., "Body") sets a heightForWidth size policy for prose that
+            # wraps — see _WRAPPING_ROLES in widgets.py. Disabling word wrap above
+            # does not undo that policy, so the label's sizeHint is still computed
+            # as if it might reflow. Under a forced offscreen render (grab()/render()
+            # without ever calling window.show(), as tools/preview_app.py does),
+            # that stale heightForWidth negotiation settles on a height far shorter
+            # than one real line needs, so consecutive rows get packed into less
+            # vertical space than their text occupies and paint on top of each
+            # other. StatTile._note sidesteps this the same way: pin a fixed pixel
+            # height so layout never asks heightForWidth for an answer at all.
+            row.setFixedHeight(metrics.height())
+            self._milestones_list.addWidget(row)
+        self._milestones_list.addStretch(1)
+
+    def _fill_trend(self, trend) -> None:
+        if trend is None:
+            self._trend_label.setText("Not enough data yet to compare weeks.")
+            self._trend_label.setStyleSheet(f"color: {theme.MUTED.name()};")
+            return
+
+        delta = trend.this_week_average - trend.last_week_average
+        direction = "up" if delta > 0 else "down" if delta < 0 else "unchanged"
+        text = f"Average score is {direction} {abs(delta):.0f} points versus last week."
+        if trend.most_improved_fault is not None:
+            fault_name = FAULT_TITLES.get(trend.most_improved_fault, trend.most_improved_fault.value)
+            text += (
+                f" {fault_name} time dropped by {_duration(trend.most_improved_seconds)}."
+            )
+        self._trend_label.setText(text)
+        self._trend_label.setStyleSheet(
+            f"color: {theme.IN_TOLERANCE.name()};" if delta >= 0
+            else f"color: {theme.WARNING.name()};"
+        )
 
     def _fill_daily(self, summaries) -> None:
         self.daily_chart.set_bars(

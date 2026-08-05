@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from postureguard.rules import Fault, FaultKind
-from postureguard.session import SessionStore
+from postureguard.session import STREAK_LOOKBACK_DAYS, SessionStore
 
 TODAY = date(2026, 7, 25)
 CRANING = [Fault(FaultKind.FORWARD_HEAD, 2.0, "Pull your chin back.", ())]
@@ -16,6 +16,10 @@ def at(day: date, hour: int = 10, second: int = 0) -> float:
 
 
 def fill(store: SessionStore, day: date, hour: int, seconds: int, status: str, faults=()):
+    # Reset rate limiter to allow filling any day in any order (backwards timestamps).
+    # The rate limiter prevents logging the same second twice, but when filling
+    # historical data out of order, we need to allow timestamps to go backwards.
+    store._last_logged = 0.0
     for s in range(seconds):
         store.log(status, faults, when=at(day, hour, s))
 
@@ -227,3 +231,90 @@ class TestPrivacy:
             row[1] for row in store._db.execute("PRAGMA table_info(samples)").fetchall()
         }
         assert columns == {"ts", "day", "hour", "status", "fault", "severity"}
+
+
+class TestStreaks:
+    def test_zero_when_no_history(self, store):
+        assert store.current_streak(today=TODAY) == 0
+
+    def test_counts_consecutive_clean_days_ending_today(self, store):
+        # Fill in chronological order (oldest first) to avoid rate limiter blocks
+        for offset in range(2, -1, -1):
+            day = TODAY - timedelta(days=offset)
+            fill(store, day, 9, 1800, "in_tolerance")
+        assert store.current_streak(today=TODAY) == 3
+
+    def test_a_bad_day_breaks_the_streak(self, store):
+        # Fill in chronological order (oldest first)
+        fill(store, TODAY - timedelta(days=2), 9, 1800, "in_tolerance")
+        fill(store, TODAY - timedelta(days=1), 9, 1800, "fault", CRANING)
+        fill(store, TODAY, 9, 1800, "in_tolerance")
+        assert store.current_streak(today=TODAY) == 1
+
+    def test_a_day_with_too_little_tracked_time_is_skipped_not_broken(self, store):
+        # Today has nothing logged yet (session hasn't started) — should not zero the streak.
+        # Fill in chronological order (oldest first)
+        fill(store, TODAY - timedelta(days=2), 9, 1800, "in_tolerance")
+        fill(store, TODAY - timedelta(days=1), 9, 1800, "in_tolerance")
+        assert store.current_streak(today=TODAY) == 2
+
+    def test_respects_custom_threshold(self, store):
+        # 900s in_tolerance, 900s fault -> 50% score. Below the default 80% threshold
+        # but above a relaxed 40% threshold.
+        fill(store, TODAY, 9, 900, "in_tolerance")
+        fill(store, TODAY, 10, 900, "fault", CRANING)
+        assert store.current_streak(today=TODAY) == 0
+        assert store.current_streak(threshold=40.0, today=TODAY) == 1
+
+    def test_streak_is_bounded_by_lookback_days(self, store):
+        # A true streak longer than STREAK_LOOKBACK_DAYS is reported as exactly that many.
+        # Fill STREAK_LOOKBACK_DAYS + 1 consecutive clean days.
+        for offset in range(STREAK_LOOKBACK_DAYS, -1, -1):
+            day = TODAY - timedelta(days=offset)
+            fill(store, day, 9, 1800, "in_tolerance")
+        assert store.current_streak(today=TODAY) == STREAK_LOOKBACK_DAYS
+
+
+class TestHasEverHadACleanDay:
+    def test_false_when_no_history(self, store):
+        assert store.has_ever_had_a_clean_day(today=TODAY) is False
+
+    def test_true_once_one_day_clears_the_threshold(self, store):
+        fill(store, TODAY - timedelta(days=200), 9, 1800, "in_tolerance")
+        assert store.has_ever_had_a_clean_day(today=TODAY) is True
+
+    def test_false_when_tracked_time_is_below_the_minimum(self, store):
+        fill(store, TODAY, 9, 1799, "in_tolerance")
+        assert store.has_ever_had_a_clean_day(today=TODAY) is False
+
+    def test_false_when_score_is_below_the_threshold(self, store):
+        fill(store, TODAY, 9, 900, "in_tolerance")
+        fill(store, TODAY, 10, 900, "fault", CRANING)
+        assert store.has_ever_had_a_clean_day(today=TODAY) is False
+
+    def test_respects_custom_threshold(self, store):
+        fill(store, TODAY, 9, 900, "in_tolerance")
+        fill(store, TODAY, 10, 900, "fault", CRANING)
+        assert store.has_ever_had_a_clean_day(threshold=40.0, today=TODAY) is True
+
+    def test_outside_the_days_window_does_not_count(self, store):
+        fill(store, TODAY - timedelta(days=400), 9, 1800, "in_tolerance")
+        assert store.has_ever_had_a_clean_day(today=TODAY) is False
+
+
+class TestFaultRange:
+    def test_empty_range_returns_empty_dict(self, store):
+        assert store.fault_seconds_in_range(TODAY, TODAY) == {}
+
+    def test_counts_only_within_the_bounds(self, store):
+        # Fill in chronological order (oldest first)
+        fill(store, TODAY - timedelta(days=10), 9, 60, "fault", CRANING)
+        fill(store, TODAY - timedelta(days=1), 9, 30, "fault", TILTING)
+        result = store.fault_seconds_in_range(TODAY - timedelta(days=6), TODAY)
+        assert result == {FaultKind.LATERAL_TILT: 30}
+
+    def test_most_costly_first(self, store):
+        fill(store, TODAY, 9, 10, "fault", TILTING)
+        fill(store, TODAY, 10, 40, "fault", CRANING)
+        result = store.fault_seconds_in_range(TODAY, TODAY)
+        assert list(result.keys()) == [FaultKind.FORWARD_HEAD, FaultKind.LATERAL_TILT]

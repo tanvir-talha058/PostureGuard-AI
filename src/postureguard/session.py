@@ -46,6 +46,10 @@ SCHEMA_VERSION = 1
 #: spent away must not dilute the score — a lunch break is not good posture.
 PRESENT_STATUSES = frozenset({"in_tolerance", "drifting", "fault"})
 
+#: Practical ceiling on how far back current_streak() computes. Not a real product
+#: limit expected to bind for typical usage.
+STREAK_LOOKBACK_DAYS = 60
+
 
 @dataclass(frozen=True)
 class DaySummary:
@@ -216,6 +220,71 @@ class SessionStore:
 
     def recent_scores(self, days: int = 14, today: date | None = None) -> list[float]:
         return [summary.score for summary in self.daily_summaries(days, today)]
+
+    def current_streak(
+        self,
+        threshold: float = 80.0,
+        min_tracked_seconds: int = 1800,
+        today: date | None = None,
+    ) -> int:
+        """Consecutive clean days, most recent first, ending at (or just before) today.
+
+        A day with less than `min_tracked_seconds` tracked is skipped rather than
+        treated as a break — a day off, or today before the session has started, should
+        not erase a streak the way an actually bad day does.
+        Streaks longer than `STREAK_LOOKBACK_DAYS` days are reported as exactly that many.
+        """
+        summaries = list(reversed(self.daily_summaries(days=STREAK_LOOKBACK_DAYS, today=today)))
+        streak = 0
+        for summary in summaries:
+            if summary.tracked_seconds < min_tracked_seconds:
+                continue
+            if summary.score < threshold:
+                break
+            streak += 1
+        return streak
+
+    def has_ever_had_a_clean_day(
+        self,
+        threshold: float = 80.0,
+        min_tracked_seconds: int = 1800,
+        days: int = 365,
+        today: date | None = None,
+    ) -> bool:
+        """Whether any day in the last `days` days cleared `threshold` with enough
+        tracked time behind it — a yes/no question the `first_clean_day` achievement
+        needs answered without materializing a year of `DaySummary` objects just to
+        scan them in Python.
+        """
+        end = today or date.today()
+        start = end - timedelta(days=days - 1)
+        row = self._db.execute(
+            "SELECT 1 FROM samples WHERE day >= ? AND day <= ?"
+            " GROUP BY day"
+            " HAVING COUNT(*) FILTER (WHERE status IN ('in_tolerance','drifting','fault'))"
+            "        >= ?"
+            "    AND (100.0 * COUNT(*) FILTER (WHERE status = 'in_tolerance')"
+            "         / NULLIF(COUNT(*) FILTER (WHERE status IN ('in_tolerance','drifting','fault')), 0))"
+            "        >= ?"
+            " LIMIT 1",
+            (start.isoformat(), end.isoformat(), min_tracked_seconds, threshold),
+        ).fetchone()
+        return row is not None
+
+    def fault_seconds_in_range(self, start: date, end: date) -> dict[FaultKind, int]:
+        """Seconds attributed to each fault type between start and end inclusive, most costly first."""
+        rows = self._db.execute(
+            "SELECT fault, COUNT(*) FROM samples"
+            " WHERE day >= ? AND day <= ? AND fault IS NOT NULL GROUP BY fault",
+            (start.isoformat(), end.isoformat()),
+        ).fetchall()
+        counted = Counter()
+        for name, count in rows:
+            try:
+                counted[FaultKind(name)] = count
+            except ValueError:
+                continue  # a fault kind from a newer version; ignore rather than crash
+        return dict(counted.most_common())
 
     def purge_before(self, cutoff: date) -> int:
         """Delete history older than a date. Returns rows removed."""
