@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from postureguard.rules import Fault, FaultKind
-from postureguard.session import SessionStore
+from postureguard.session import SessionStore, STREAK_LOOKBACK_DAYS
 
 TODAY = date(2026, 7, 25)
 CRANING = [Fault(FaultKind.FORWARD_HEAD, 2.0, "Pull your chin back.", ())]
@@ -261,6 +261,14 @@ class TestStreaks:
         fill(store, TODAY, 10, 900, "fault", CRANING)
         assert store.current_streak(today=TODAY) == 0
         assert store.current_streak(threshold=40.0, today=TODAY) == 1
+
+    def test_streak_is_bounded_by_lookback_days(self, store):
+        # A true streak longer than STREAK_LOOKBACK_DAYS is reported as exactly that many.
+        # Fill STREAK_LOOKBACK_DAYS + 1 consecutive clean days.
+        for offset in range(STREAK_LOOKBACK_DAYS, -1, -1):
+            day = TODAY - timedelta(days=offset)
+            fill(store, day, 9, 1800, "in_tolerance")
+        assert store.current_streak(today=TODAY) == STREAK_LOOKBACK_DAYS
 
 
 class TestFaultRange:

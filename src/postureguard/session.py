@@ -46,6 +46,10 @@ SCHEMA_VERSION = 1
 #: spent away must not dilute the score — a lunch break is not good posture.
 PRESENT_STATUSES = frozenset({"in_tolerance", "drifting", "fault"})
 
+#: Practical ceiling on how far back current_streak() computes. Not a real product
+#: limit expected to bind for typical usage.
+STREAK_LOOKBACK_DAYS = 60
+
 
 @dataclass(frozen=True)
 class DaySummary:
@@ -228,8 +232,9 @@ class SessionStore:
         A day with less than `min_tracked_seconds` tracked is skipped rather than
         treated as a break — a day off, or today before the session has started, should
         not erase a streak the way an actually bad day does.
+        Streaks longer than `STREAK_LOOKBACK_DAYS` days are reported as exactly that many.
         """
-        summaries = list(reversed(self.daily_summaries(days=60, today=today)))
+        summaries = list(reversed(self.daily_summaries(days=STREAK_LOOKBACK_DAYS, today=today)))
         streak = 0
         for summary in summaries:
             if summary.tracked_seconds < min_tracked_seconds:
